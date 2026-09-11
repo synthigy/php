@@ -1,0 +1,17 @@
+parameters:
+    level: 8
+    # This SDK's typed tier IS PHPDoc (array shapes over plain arrays), so
+    # annotations are claims, not proofs — tests legitimately assert those
+    # claims hold at runtime. Treating them as certain would mark such a
+    # test "always true" and hide the very drift the annotations can suffer.
+    treatPhpDocTypesAsCertain: false
+    paths:
+        - src
+        - tests
+        - bin
+    excludePaths:
+        # Generated output — its shapes come from the server's schema, and it
+        # is regenerated, never hand-edited. It IS syntax-gated at generation
+        # time (`php -l` before write); analysing it here would only report
+        # on the emitter's output, which the emitter's own tests cover.
+        - codegen-example/*

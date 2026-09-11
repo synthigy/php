@@ -1,0 +1,19 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoload = null;
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $candidate) {
+    if (is_file($candidate)) {
+        $autoload = $candidate;
+        break;
+    }
+}
+if ($autoload === null) {
+    fwrite(STDERR, "synthigy-codegen: vendor/autoload.php not found — run `composer install` in sdk/php first.\n");
+    exit(1);
+}
+require $autoload;
+
+exit(\Synthigy\Codegen\main(array_slice($argv, 1)));

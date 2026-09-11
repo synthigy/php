@@ -1,0 +1,72 @@
+{
+    "name": "synthigy/sdk",
+    "description": "Thin PHP client for Synthigy's /data endpoint: reads, writes, XSQL, OAuth and typed code generation. No watch/SSE layer.",
+    "type": "library",
+    "keywords": [
+        "synthigy",
+        "sdk",
+        "dataset",
+        "iam",
+        "client"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Robert Geršak"
+        }
+    ],
+    "homepage": "https://github.com/synthigy/synthigy",
+    "support": {
+        "issues": "https://github.com/synthigy/php/issues",
+        "source": "https://github.com/synthigy/php"
+    },
+    "require": {
+        "php": "^8.1",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5",
+        "phpstan/phpstan": "^2.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Synthigy\\": "src/"
+        },
+        "files": [
+            "src/Filters.php",
+            "src/Selection.php",
+            "src/Ops.php",
+            "src/Compose.php",
+            "src/Codegen/Naming.php",
+            "src/Codegen/Pull.php",
+            "src/Codegen/Describe.php",
+            "src/Codegen/Render.php",
+            "src/Codegen/Commands.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Synthigy\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/synthigy-codegen"
+    ],
+    "scripts": {
+        "analyse": "phpstan analyse --memory-limit=512M",
+        "test": [
+            "@analyse",
+            "phpunit"
+        ],
+        "test:live": [
+            "@analyse",
+            "phpunit --group live"
+        ]
+    },
+    "scripts-descriptions": {
+        "analyse": "PHPStan level 8 over src/, tests/ and bin/",
+        "test": "Static analysis + the hermetic unit suite (no network)",
+        "test:live": "Static analysis + the creds-gated live suite against a real server"
+    }
+}

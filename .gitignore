@@ -1,0 +1,35 @@
+# Composer-installed dependencies. composer.lock IS committed (like
+# sdk/js/package-lock.json): the test command gates on PHPStan, and
+# PHPStan versions differ in what they report, so the dev toolchain
+# needs to be reproducible.
+/vendor/
+/composer.phar
+
+# Test + analysis caches
+.phpunit.result.cache
+/.phpunit.cache/
+/.phpstan.cache/
+phpstan-baseline.neon.tmp
+
+# NOTE: codegen-example/{schema.json,movies.ir.json,movies_gen.php} are
+# committed ON PURPOSE — the .ir.json is a lockfile the drift gate
+# (`synthigy-codegen check`) compares against, and the generated file is
+# the worked example. Don't add *_gen.php here.
+
+# Secrets — NEVER commit
+.env
+.env.local
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Agent scratch
+.claude/
+CLAUDE.md
