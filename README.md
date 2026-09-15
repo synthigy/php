@@ -202,10 +202,11 @@ only if optional in every member" rule). Most batches are parameterless
 convenience bundles in practice; a batch whose members need different
 params each needs a follow-up.
 
-A committed end-to-end example lives in `codegen-example/`
-(`movies.xsql` → `schema.json` + `movies.ir.json` → `movies_gen.php`, plus
-a `demo.php` that runs both the generated typed operations and raw SDK
-calls against a live server) — see `codegen-example/README.md`.
+An end-to-end example lives in
+[synthigy/examples: movies/php](https://github.com/synthigy/examples/tree/main/movies/php)
+(`movies.xsql` → `pull` + `gen` → generated typed operations, plus a `demo.php`
+and a small web page that run both those and raw SDK calls against a live
+server).
 
 ## Development workflow
 

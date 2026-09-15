@@ -125,6 +125,17 @@ final class Synthigy
         return self::client()->delete($entity, $data, $actingAs, $keyFormat);
     }
 
+    /** @return array<string,mixed> */
+    public static function deploy(string $exportContents, ?string $actingAs = null, ?string $keyFormat = null): array
+    {
+        return self::client()->deploy($exportContents, $actingAs, $keyFormat);
+    }
+
+    public static function destroy(string $datasetXid, ?string $actingAs = null, ?string $keyFormat = null): bool
+    {
+        return self::client()->destroy($datasetXid, $actingAs, $keyFormat);
+    }
+
     /**
      * @param array<string,mixed> $args
      * @return list<array<string,mixed>>

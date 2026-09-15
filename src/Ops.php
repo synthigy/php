@@ -142,6 +142,18 @@ function opQuery(string $xsql, ?array $params = null, string $op = 'search'): ar
     return $o;
 }
 
+/** @return array{op: 'deploy', data: string} */
+function opDeploy(string $exportContents): array
+{
+    return ['op' => 'deploy', 'data' => $exportContents];
+}
+
+/** @return array{op: 'delete', entity: 'dataset', data: array{xid: string}} */
+function opDestroy(string $datasetXid): array
+{
+    return ['op' => 'delete', 'entity' => 'dataset', 'data' => ['xid' => $datasetXid]];
+}
+
 /** @return array{op: 'deployed-model'} */
 function opDeployedModel(): array
 {

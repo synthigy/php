@@ -126,6 +126,33 @@ final class ClientTest extends TestCase
         self::assertSame('purge', $t->lastRequestBody()['operations'][0]['op']);
     }
 
+    public function testDeployPostsExportContentsVerbatim(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => [
+            'deployed' => true, 'version' => '0.3', 'dataset' => 'ds-1',
+        ]]]]);
+        $c = $this->client($t);
+        $ack = $c->deploy('{"~:xid":"v-1"}');
+        self::assertSame(['deployed' => true, 'version' => '0.3', 'dataset' => 'ds-1'], $ack);
+        $op = $t->lastRequestBody()['operations'][0];
+        self::assertSame('deploy', $op['op']);
+        self::assertSame('{"~:xid":"v-1"}', $op['data']);
+        self::assertArrayNotHasKey('entity', $op);
+    }
+
+    public function testDestroyIsDeleteOnDatasetByXid(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => true]]]);
+        $c = $this->client($t);
+        self::assertTrue($c->destroy('ds-1'));
+        $op = $t->lastRequestBody()['operations'][0];
+        self::assertSame('delete', $op['op']);
+        self::assertSame('dataset', $op['entity']);
+        self::assertSame(['xid' => 'ds-1'], $op['data']);
+    }
+
     public function testSqlTemplateDefaultsParams(): void
     {
         $t = new FakeTransport();

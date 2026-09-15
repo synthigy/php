@@ -97,6 +97,29 @@ trait Crud
     }
 
     /**
+     * Deploy a dataset version from a modeler export. Pass the export
+     * file's contents verbatim — the server decodes it. Requires
+     * dataset:deploy. The ack carries `deployed`, `version` and the
+     * `dataset` xid destroy() takes.
+     *
+     * @return array<string,mixed>
+     */
+    public function deploy(string $exportContents, ?string $actingAs = null, ?string $keyFormat = null): array
+    {
+        $data = $this->execOne(opDeploy($exportContents), $actingAs, $keyFormat);
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * Destroy a dataset — every version, table and row. Requires
+     * dataset:delete. Idempotent.
+     */
+    public function destroy(string $datasetXid, ?string $actingAs = null, ?string $keyFormat = null): bool
+    {
+        return (bool)$this->execOne(opDestroy($datasetXid), $actingAs, $keyFormat);
+    }
+
+    /**
      * Hard-deletes every record matching $args (RLS-scoped). Returns the
      * purged records.
      *

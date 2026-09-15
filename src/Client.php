@@ -31,6 +31,14 @@ use Synthigy\Http\HttpTransport;
  */
 final class Client
 {
+    /**
+     * The platform API this SDK is a client of. `/data`, `/schema`, `/history`,
+     * `/logs` and subscriptions all require a token bound to it. It names the
+     * API, never a deployment, so it is the same string on localhost and in
+     * production.
+     */
+    public const PLATFORM_AUDIENCE = 'https://synthigy.com';
+
     use Crud;
     use Schema;
 
@@ -42,7 +50,7 @@ final class Client
     private readonly ?string $defaultActingAs;
     private readonly ?string $defaultKeyFormat;
     private readonly ?float $defaultTimeoutSeconds;
-    private readonly ?string $defaultAudience;
+    private readonly string $defaultAudience;
 
     public function __construct(
         string $endpoint,
@@ -65,14 +73,15 @@ final class Client
         $this->defaultActingAs = $actingAs;
         $this->defaultKeyFormat = $keyFormat;
         $this->defaultTimeoutSeconds = $timeoutSeconds;
-        // The platform's audience model is opt-in by design (never a
-        // default, never implied by a client's role/API links —
-        // docs/plans/PLAN-AUDIENCE-BINDING.md REV3): a client_credentials
-        // mint with no `audience` resolves to the identity-only OIDC
-        // audience, not the /data-capable platform one, no matter how the
-        // client is configured server-side. $audience binds it ONCE here
-        // instead of threading it through every call site.
-        $this->defaultAudience = $audience;
+        // A client_credentials mint naming no audience resolves to the
+        // identity-only OIDC audience, not the /data-capable platform one, no
+        // matter how the client is configured server-side. This SDK is the
+        // client for the platform API, so that is what it mints for: nothing
+        // to configure, and nowhere to look the value up if there were, since
+        // the server does not advertise it in discovery. Minting for some
+        // OTHER API is a per-call concern. The env var is an escape hatch.
+        $this->defaultAudience = $audience
+            ?: (getenv('SYNTHIGY_AUDIENCE') ?: self::PLATFORM_AUDIENCE);
 
         if ($token !== null) {
             $this->tokenSource = null;
