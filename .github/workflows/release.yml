@@ -35,7 +35,23 @@ jobs:
           PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
           PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
         run: |
-          [ -n "$PACKAGIST_TOKEN" ] || { echo "no token — webhook handles it"; exit 0; }
+          [ -n "$PACKAGIST_TOKEN" ] || { echo "no token - relying on the webhook"; exit 0; }
           curl -fsS -XPOST -H'content-type:application/json' \
             "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}" \
             -d '{"repository":{"url":"https://github.com/synthigy/php"}}'
+      # A green publish job that mirrored nothing is how v0.1.1 sat invisible:
+      # composer.json carries no version, so the tag at the registry is the only
+      # proof. Already-there is a no-op; never-arrived is red, not green.
+      - name: On Packagist?
+        run: |
+          v="$GITHUB_REF_NAME"
+          for i in $(seq 1 20); do
+            if curl -fsS "https://repo.packagist.org/p2/synthigy/sdk.json" \
+               | jq -e --arg v "$v" '.packages["synthigy/sdk"][] | select(.version == $v)' >/dev/null; then
+              echo "synthigy/sdk $v is on Packagist"; exit 0
+            fi
+            sleep 15
+          done
+          echo "synthigy/sdk $v never appeared on Packagist."
+          echo "Fix: add the Packagist webhook to synthigy/php, or set PACKAGIST_USERNAME + PACKAGIST_TOKEN."
+          exit 1
