@@ -3,6 +3,68 @@
 All notable changes to `synthigy/sdk` (Packagist). Follows
 [semver](https://semver.org). Pre-1.0: breaking changes can land on minor bumps.
 
+## 0.2.0
+
+### Added
+- **Codegen takes several `.xsql` files or directories.** `gen` and `check`
+  accept any mix of files and directories (searched recursively, sorted by
+  path); one file is generated for all of them. The default output is
+  `<name>_gen.php` for a single file and `ops_gen.php` otherwise.
+- **`sync`/`stack` document the list form**: one record, or a list of them in
+  one operation (bulk import). It always worked at runtime; the docblocks
+  (client, facade, `opSync`/`opStack`, and the generated `sync<Entity>` /
+  `stack<Entity>`) typed it as one record, so PHPStan refused a bulk call.
+- **Browser login: `loginStart` / `loginComplete` / `loginCancel`** — on
+  `Client` and the `Synthigy` facade. OIDC authorization code + PKCE for a
+  confidential client, same contract as the JS and Python SDKs. In-flight
+  logins live in a `LoginStore` passed as `loginStore:` (README has a
+  `$_SESSION` one; `MemoryLoginStore` is single-process and useless under
+  PHP-FPM). `$clientId`/`$clientSecret` are now kept even alongside a static
+  `$token`, since the code exchange needs them.
+- **`Synthigy::connect()` / `new Client()` take the endpoint from
+  `SYNTHIGY_ENDPOINT` when none is passed.** Under `synthigy exec` that and the
+  identity are already set, so `Synthigy::connect()` with no arguments is the
+  whole setup. No endpoint anywhere is `NO_ENDPOINT` (category `validation`,
+  not retryable); it was `INVALID_BODY`.
+- **`compile($source, $params, $op)`** — on `Client` and on the `Synthigy`
+  static facade. `POST /compile` returns the wire operation the engine would
+  execute for an XSQL source, without executing it. The compiler is the
+  authority on the wire format, so this is how you take programmatic control of
+  a query instead of hand-writing the array: edit what comes back and pass it
+  to `exec()`. `$params` bind exactly as on `query()`, so the result IS what the
+  engine receives.
+
+### Changed
+- **Codegen reads and writes `ops.ir.json`** in the `.xsql` directory, the IR
+  file every other SDK's generator shares (was `<file>.ir.json` beside each
+  source). A CI `check` gate pointing at the old file must be re-pointed;
+  the first `gen` writes the new one.
+
+### Fixed
+- **Codegen:** each `.xsql` file is sent to `describe` separately (`sources: [{path,
+  source}]`) instead of one concatenated text. Concatenation leaked the
+  first file's buffer-level `@namespace` into every later file and dropped
+  the others'. Needs an engine with per-file `describe`. A `(namespace,
+  name)` declared twice across files now fails with `DUPLICATE_OPERATION`,
+  naming both files; a `@batch` naming an op from another file fails with
+  `BATCH_MEMBER_UNRESOLVED`. Both are `validation` in the error table.
+  A server error from `describe` is now reported as `codegen: describe
+  failed: CODE: message`; it used to be an uncaught fatal error.
+- **`TIMEOUT` is category `rate_limit`**, as in the Go, JS and Python SDKs; it
+  was `network`. Still retryable.
+- **`synthigy-codegen gen --pull xsql/` no longer fails with a usage error.**
+  `--pull` and `--no-writes` swallowed the next argument as their value, so
+  the order every other SDK's generator takes did not work here.
+- **`--out` into a directory that does not exist yet creates it.** The write
+  failed and the error blamed `php -l`, because the write itself was never
+  checked. The first generation after a clean clone always hit this.
+- **`gen` fetches `xsql/schema.json` itself** when it is missing, and
+  refreshes it with `--pull`, like the other SDKs' generators. A first run
+  used to stop and ask for a separate `pull`.
+- **Regenerating from a current `ops.ir.json` works offline.** `gen` demanded
+  an endpoint before looking at the cache; it now asks for one only when the
+  `.xsql` has changed, and says so.
+
 ## 0.1.1
 
 ### Added

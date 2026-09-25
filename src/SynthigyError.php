@@ -26,6 +26,10 @@ final class SynthigyError extends \RuntimeException
         'PROVISION_FORBIDDEN' => 'auth',
         'CLAIM_INVALID' => 'auth',
         'NO_TOKEN' => 'auth',
+        'NO_LOGIN_STORE' => 'auth',
+        'LOGIN_NONCE_MISMATCH' => 'auth',
+        'LOGIN_EXCHANGE_FAILED' => 'auth',
+        'NO_ENDPOINT' => 'validation',
         // iam — RBAC/RLS denial, caller lacks permission
         'FORBIDDEN' => 'iam',
         'FORBIDDEN_OP' => 'iam',
@@ -61,9 +65,14 @@ final class SynthigyError extends \RuntimeException
         'PARAM_TYPE_MISMATCH' => 'validation',
         'NOT_CONNECTED' => 'validation',
         'XID_REQUIRED' => 'validation',
+        'NAMESPACE_REQUIRED' => 'validation',
+        'DUPLICATE_OPERATION' => 'validation',
+        'BATCH_MEMBER_UNRESOLVED' => 'validation',
         'CLAIM_METHOD_NOT_ALLOWED' => 'validation',
         'PASSWORD_TOO_WEAK' => 'validation',
         'RETURN_URL_NOT_REGISTERED' => 'validation',
+        'LOGIN_STATE_UNKNOWN' => 'validation',
+        'LOGIN_REQUIRES_CONFIDENTIAL_CLIENT' => 'validation',
         // not_found — referenced entity/relation/record doesn't exist
         'UNKNOWN_ENTITY' => 'not_found',
         'UNKNOWN_RELATION' => 'not_found',
@@ -75,9 +84,10 @@ final class SynthigyError extends \RuntimeException
         'FK_VIOLATION' => 'conflict',
         'CHECK_VIOLATION' => 'conflict',
         'NOT_NULL_VIOLATION' => 'conflict',
-        // network — transport failure (DNS, TCP, timeout, abort)
+        // rate_limit — too many requests / capacity
+        'TIMEOUT' => 'rate_limit',
+        // network — transport failure (DNS, TCP, abort)
         'NETWORK_ERROR' => 'network',
-        'TIMEOUT' => 'network',
         // internal — unexpected server error, retry-safe
         'INTERNAL_ERROR' => 'internal',
         'OPERATION_ERROR' => 'internal',

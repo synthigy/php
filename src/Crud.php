@@ -59,8 +59,8 @@ trait Crud
      * $returning for the written records, or mint ids up front with newXid(),
      * which is the cheap way to know what you wrote.
      *
-     * @param array<string,mixed> $data
-     * @return array<string,mixed>
+     * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+     * @return array<mixed> ['count' => n], or the written record(s) with $returning
      */
     public function sync(string $entity, array $data, ?string $actingAs = null, ?string $keyFormat = null, bool $returning = false): array
     {
@@ -70,8 +70,8 @@ trait Crud
     /**
      * Same $returning contract as sync.
      *
-     * @param array<string,mixed> $data
-     * @return array<string,mixed>
+     * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+     * @return array<mixed> ['count' => n], or the written record(s) with $returning
      */
     public function stack(string $entity, array $data, ?string $actingAs = null, ?string $keyFormat = null, bool $returning = false): array
     {

@@ -54,6 +54,42 @@ trait Schema
         return self::asRecordList($diagnostics);
     }
 
+    /**
+     * Compile an XSQL source to the wire operation the engine would execute
+     * (POST /compile) — nothing runs. The compiler is the authority on the
+     * wire format, so this is how you take programmatic control of a query
+     * instead of hand-writing the array: edit what comes back and pass it to
+     * exec(). $params bind exactly as they do on query(), so the result IS
+     * what the engine receives.
+     *
+     * @param array<string,mixed>|null $params
+     * @return array<string,mixed>
+     */
+    public function compile(string $source, ?array $params = null, string $op = 'search'): array
+    {
+        $body = ['operations' => [opQuery($source, $params, $op)]];
+        $resp = $this->authedRequest('POST', $this->endpoint . '/compile', self::encodeJson($body), ['Content-Type' => 'application/json']);
+        if ($resp->status < 200 || $resp->status >= 300) {
+            throw new SynthigyError("compile request failed ({$resp->status})", 'HTTP_ERROR', status: $resp->status);
+        }
+        $decoded = json_decode($resp->body, true);
+        $results = is_array($decoded) ? ($decoded['results'] ?? []) : [];
+        if (!is_array($results) || $results === []) {
+            throw new SynthigyError('compile returned no results', 'INTERNAL_ERROR', status: $resp->status);
+        }
+        $result = $results[0];
+        if (!is_array($result) || ($result['ok'] ?? false) !== true) {
+            $error = is_array($result) && is_array($result['error'] ?? null) ? $result['error'] : [];
+            throw new SynthigyError(
+                is_string($error['message'] ?? null) ? $error['message'] : 'compile failed',
+                is_string($error['code'] ?? null) ? $error['code'] : 'XSQL_PARSE_ERROR',
+                status: $resp->status,
+            );
+        }
+        $operation = $result['operation'] ?? [];
+        return is_array($operation) ? $operation : [];
+    }
+
     /** @return array<string,mixed> */
     public function deployedModel(): array
     {

@@ -16,6 +16,13 @@ final class ErrorsTest extends TestCase
         self::assertFalse($e->retryable);
     }
 
+    public function testTimeoutIsRateLimitLikeTheOtherSdks(): void
+    {
+        $e = new SynthigyError('slow', 'TIMEOUT');
+        $this->assertSame('rate_limit', $e->category);
+        $this->assertTrue($e->retryable);
+    }
+
     public function testUnknownCodeFallsBackToInternal(): void
     {
         $e = new SynthigyError('mystery', 'SOME_FUTURE_CODE');

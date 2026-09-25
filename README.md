@@ -26,22 +26,24 @@ Requires PHP ≥ 8.1 with `ext-curl` and `ext-json`. Composer also links the
 ```php
 use Synthigy\Synthigy;
 
-use function Synthigy\eq;
-use function Synthigy\gt;
+Synthigy::connect();          // endpoint + identity from `synthigy exec`
 
-Synthigy::connect('https://synthigy.example.com',
-    clientId: 'my-service', clientSecret: getenv('SYNTHIGY_SECRET'));
-
-$users = Synthigy::search('User',
-    ['active' => eq(true), 'age' => gt(18), '_limit' => 10],
-    ['name' => null, 'email' => null, 'roles' => ['name' => null]],
-    actingAs: $userXid);
+// XSQL: the shape you write is the shape you get back
+$movies = Synthigy::query(<<<'XSQL'
+movie (release_year > ?since:int, limit 10)
+  xid
+  title
+  ->genres
+    name
+XSQL, ['since' => 1990], actingAs: $userXid);
 ```
+
+Run it with `synthigy exec -- php app.php`.
 
 ## One process, one client
 
 `Synthigy::connect()` installs a process-wide default; every static verb
-(`Synthigy::search()`, `Synthigy::sync()`, ...) delegates to it. **Identity
+(`Synthigy::query()`, `Synthigy::sync()`, ...) delegates to it. **Identity
 is multiplexed per-call via `actingAs:`, never a second connect().**
 Constructing `new Synthigy\Client(...)` directly is the escape hatch for
 tests or a genuine multi-endpoint script.
@@ -49,55 +51,49 @@ tests or a genuine multi-endpoint script.
 ## Reads
 
 ```php
-$movies = Synthigy::search('Movie', ['_limit' => 5], ['title' => null]);
-$movie  = Synthigy::get('Movie', ['xid' => 'm-1'], ['title' => null]); // flat unique-key args, null if missing
-
-$rows = Synthigy::sqlTemplate(
-    'SELECT COUNT(*) AS n FROM {movie} WHERE {movie.release_year} > ?', [1990]);
-
-// XSQL — string query surface (server parses/compiles; GraphQL model)
-$rows = Synthigy::query(<<<'XSQL'
-movie (release_year > ?y:int, _limit 10)
+$movies = Synthigy::query(<<<'XSQL'
+movie (release_year > ?y:int, limit 10)
   title
   ->genres
     name
 XSQL, ['y' => 1990]);
+
+$movie = Synthigy::query(<<<'XSQL'
+movie (xid = ?xid:string)
+  title
+XSQL, ['xid' => $xid], op: 'get');         // one record, or null
+
+$rows = Synthigy::sqlTemplate(
+    'SELECT COUNT(*) AS n FROM {movie} WHERE {movie.release_year} > ?', [1990]);
 ```
 
-- Operators: `eq neq gt gte lt lte in_ nin like ilike isNull isNotNull` and
-  `and_ / or_ / not_` — `and`/`or`/`not` are reserved words in PHP, hence
-  the underscore, same reason as the Python SDK. Wire mapping note:
-  `gte` → `_ge`, `lte` → `_le`.
-- Selections mirror the shape you want back: `null` = scalar, a nested
-  array = relation. The server's join default is **LEFT** — a projected
-  relation never drops its parent, and relation args filter the related
-  rows. To scope parents to those HAVING the relation, be explicit:
-  `rel([...], args: ['_join' => 'inner'])`. The SDK injects nothing.
-- **Empty relations are omitted** by the wire, never `[]` — check with
-  `$movie['genres'] ?? []`.
-- Counting/aggregation has **no dedicated op**: use `sqlTemplate` or XSQL
-  `_count`/`_agg` selections.
+- `?name:type=default` are named params, passed as an array.
+- `->genres` is a **left** pull — a movie with no genres is still returned;
+  `-genres` is **inner** and keeps only movies that have one.
+- **Empty relations are omitted**, never `[]` — use `$movie['genres'] ?? []`.
+- Counting and aggregation compute in the database: `_count` / `_agg` in XSQL,
+  or `sqlTemplate`.
 
 ## Writes
 
 ```php
-Synthigy::sync('Movie', ['xid' => 'm-1', 'title' => 'Dune',
-    'genres' => [['xid' => 'g-scifi']]]);      // upsert, REPLACES link-sets
-Synthigy::stack('user_rating', ['value' => 5, 'movie' => ['xid' => 'm-1']]); // additive
-Synthigy::slice('Movie', ['xid' => 'm-1'], ['genres' => [['xid' => 'g-scifi']]]); // unlink
-Synthigy::delete('Movie', ['xid' => 'm-1']);   // soft delete
-Synthigy::purge('user_rating', ['value' => ['_lt' => 2]]);  // hard delete by filter
+Synthigy::sync('movie', ['xid' => $xid, 'title' => 'Dune']);               // upsert, REPLACES link-sets
+Synthigy::stack('user_rating', ['value' => 5, 'movie' => ['xid' => $xid]]); // additive
+Synthigy::delete('movie', ['xid' => $xid]);                               // soft delete
 ```
 
-Batch heterogeneous ops in one round trip:
+`slice` (unlink without deleting) and `purge` (hard delete by filter) exist
+too.
+
+Several operations in one round trip:
 
 ```php
-use function Synthigy\opSlice;
+use function Synthigy\opQuery;
 use function Synthigy\opStack;
 
 $results = Synthigy::exec([
-    opSlice('User', ['xid' => $u], ['roles' => [['xid' => $old]]]),
-    opStack('User', ['xid' => $u, 'roles' => [['xid' => $new]]]),
+    opQuery("movie (limit 3)\n  title"),
+    opStack('user_rating', ['value' => 4, 'movie' => ['xid' => $xid]]),
 ], actingAs: $userXid);
 ```
 
@@ -142,71 +138,147 @@ server logs). Discriminate on `->code`, never the message.
   a per-call override for minting tokens for a *different* audience (e.g.
   a third-party service Synthigy federates for).
 
-## Codegen
+### Logging users in (`loginStart` / `loginComplete`)
 
-`bin/synthigy-codegen` turns an `.xsql` operations document + the server
-schema into one typed PHP file (inline PHPDoc `array{...}` shapes over
-plain associative arrays + static-method namespace classes). The server
-owns the XSQL grammar — `op: "describe"` compiles the source and returns a
-language-neutral IR; the emitter renders PHP from IR JSON and parses
-nothing.
+Authorization code + PKCE for a confidential server: the SDK owns the
+protocol, your app owns sessions, cookies and routing. `loginStart()`
+returns a URL, `loginComplete()` takes the callback's `code`/`state`. The
+in-flight login lives in a `LoginStore` you pass as `loginStore:` —
+`put($state, $login)` and one-shot `take($state)`.
 
-```bash
-# 1. Pull the IAM-filtered schema (commit it)
-SYNTHIGY_CLIENT_ID=... SYNTHIGY_CLIENT_SECRET=... \
-  bin/synthigy-codegen pull http://localhost:7887 schema.json
-
-# 2. Describe + generate (saves movies.ir.json beside the .xsql — commit
-#    schema.json + .xsql + .ir.json; after that, gen runs OFFLINE forever)
-bin/synthigy-codegen gen movies.xsql          # -> movies_gen.php
-
-# 3. CI drift gate: offline sourceHash check ("edited .xsql, forgot
-#    codegen"); live describe-diff when SYNTHIGY_* creds are present
-bin/synthigy-codegen check movies.xsql
-```
+Under PHP-FPM every request is a new process, so keep logins in the
+session. `MemoryLoginStore` is for one long-lived process only (tests,
+RoadRunner, Swoole); under FPM every login would fail `LOGIN_STATE_UNKNOWN`.
 
 ```php
-use Synthigy\Synthigy;
-use Generated\Movies;
-use Generated\Batches;
-use Generated\Writes;
+final class SessionLoginStore implements Synthigy\LoginStore
+{
+    public function put(string $state, array $login): void { $_SESSION['synthigy_login'][$state] = $login; }
+    public function take(string $state): ?array
+    {
+        $login = $_SESSION['synthigy_login'][$state] ?? null;
+        unset($_SESSION['synthigy_login'][$state]);
+        return $login;
+    }
+}
 
-Synthigy::connect($endpoint, clientId: ..., clientSecret: ...);
+session_start();
+Synthigy::connect(clientId: 'my-app', clientSecret: getenv('APP_SECRET'),
+    loginStore: new SessionLoginStore());
 
-$rows = Movies::topMovies(['since' => 2000]);     // list<array{xid: string, title: string, ...}>
-$one  = Movies::movieDetail();                    // array{...}|null  (a @get op)
-$both = Batches::overview();                      // @batch -> ONE round trip, keyed by member name
-Writes::syncMovie(['title' => 'Dune', 'genres' => [['xid' => 'g-scifi']]]);
+// /login
+header('Location: ' . Synthigy::loginStart(CALLBACK, returnTo: $_GET['returnTo'] ?? '/')['url']);
+
+// /auth/callback
+if (isset($_GET['error'])) {                       // the user cancelled at the IdP
+    header('Location: ' . (Synthigy::loginCancel($_GET['state'] ?? '')['return_to'] ?? '/'));
+    exit;
+}
+$done = Synthigy::loginComplete($_GET['code'], $_GET['state'], CALLBACK);
+$_SESSION['user'] = $done['user'];                 // ['xid', 'name', 'scopes']
+header('Location: ' . $done['return_to']);
 ```
 
-Codegen authenticates **as the app** — the same client credentials the app
-uses at runtime. `/schema` and `describe` are IAM-filtered per principal,
-so the generated contract is exactly what the app can do; a personal/dev
-identity would generate a surface the app can't honor. `--no-writes` skips
-the schema-derived `Writes` class. Every generated file is checked with
-`php -l` before it's written — a syntax error in the emitter is a build
-failure, never a silently broken file. Row/param "types" are **inline
-PHPDoc array shapes**, not a separate reusable alias tier per op — PHP has
-no structural array types, and PHPDoc is never executed, so there is no
-ordering constraint and no hydration code to get wrong; a shape is
-documentation over the plain associative array the wire already returns,
-matching this SDK's "records = plain arrays" rule all the way through
-codegen. The one place a real `@phpstan-type` alias is emitted is the
-per-entity `Input` shape on the `Writes` class, since `sync`/`stack` for
-the same entity both reference it.
+- `$done['user']['xid']` is read from the id_token — no `/data` lookup. Pass
+  it as `actingAs:` to act on the user's behalf.
+- No store → `NO_LOGIN_STORE`; no `clientSecret` →
+  `LOGIN_REQUIRES_CONFIDENTIAL_CLIENT`. Other codes: `LOGIN_STATE_UNKNOWN`,
+  `LOGIN_NONCE_MISMATCH`, `LOGIN_EXCHANGE_FAILED` (with `->status`).
+- `publicEndpoint:` when the browser reaches the IdP on a different URL than
+  PHP does (containers, reverse proxies).
+- The code exchange never retries: an authorization code is one-shot.
 
-**Known v1 simplification vs. the Python/Go/JS generators:** a `@batch`
-method takes one raw `array $params` forwarded verbatim to every member's
-query — there is no per-member param merge/dedupe (Python's "optional
-only if optional in every member" rule). Most batches are parameterless
-convenience bundles in practice; a batch whose members need different
-params each needs a follow-up.
+## Code generation
 
-An end-to-end example lives in
-[synthigy/examples: movies/php](https://github.com/synthigy/examples/tree/main/movies/php)
-(`movies.xsql` → `pull` + `gen` → generated typed operations, plus a `demo.php`
-and a small web page that run both those and raw SDK calls against a live
-server).
+Write your queries in `.xsql` files and get typed functions for them. The
+server compiles the queries, so the types always match what it returns.
+
+**1. Get a server.** In your project folder:
+
+```bash
+synthigy env init
+synthigy up
+```
+
+The first `up` prints a `/setup` link; open it and pick a database. (No
+browser? `synthigy up --db sqlite` skips the wizard.) Already have a server?
+Skip this step.
+
+**2. Deploy your data model** in the modeler (or from code with `Synthigy::deploy()`, as a
+client with the Dataset Developer role).
+
+**3. Connect as your app.** Create its client once, then save it to the
+project:
+
+```bash
+synthigy iam add-client "My App" --id my-app --type confidential \
+  --role "Dataset Explorer" --api Synthigy --grant client_credentials --local
+synthigy connect http://localhost:7887 --client-id my-app
+```
+
+`add-client` prints the secret once; `connect` asks for it. Code is generated
+for what this app is allowed to see. (`--local` works on the server's own
+machine; for a remote server, create the client in the console.)
+
+**4. Install the SDK:**
+
+```bash
+composer require synthigy/sdk
+```
+
+**5. Write a query** in `xsql/movies.xsql`:
+
+```
+@search list
+movie (release_year > ?since:int=1990, limit ?limit:int=20)
+  xid
+  title
+  release_year
+```
+
+**6. Generate:**
+
+```bash
+synthigy exec -- vendor/bin/synthigy-codegen gen xsql/ --out gen/ops.php
+```
+
+This writes `gen/ops.php` (namespace `Generated`, change it with `--namespace`), and saves `xsql/schema.json` and `xsql/ops.ir.json`
+next to your queries.
+
+**7. Use it:**
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/gen/ops.php';
+
+use Synthigy\Synthigy;
+
+Synthigy::connect();
+$movies = \Generated\Movie::list(['since' => 2000]);
+echo json_encode(array_column($movies, 'title')), "\n";
+```
+
+```bash
+synthigy exec -- php app.php
+```
+
+`synthigy exec` gives your program the server address and the app's identity.
+Without it, pass them yourself: `Synthigy::connect($endpoint, clientId: ..., clientSecret: ...)`.
+
+**After you edit a query**, run step 6 again. As long as the `.xsql` files are
+unchanged it works offline from `xsql/ops.ir.json`; after an edit it needs the
+server, and it never generates from outdated results. In CI:
+
+```bash
+vendor/bin/synthigy-codegen check xsql/
+```
+
+**What to commit:** your `.xsql` files and `xsql/ops.ir.json`.
+`xsql/schema.json` is your whole data model, so commit it only in a private
+repo.
+
+`@batch` ops become one-round-trip methods on `Batches`, and every entity gets typed `Writes::sync<Entity>` / `stack<Entity>` / `delete<Entity>`. Every generated file passes `php -l` before it is written. A `@batch` method forwards one `$params` array to every member query.
 
 ## Development workflow
 
@@ -228,7 +300,6 @@ tests runs the gate, with no separate CI step to forget.
 Everything above works without a local PHP toolchain:
 
 ```bash
-cd sdk/php
 docker run --rm -v "$PWD":/app -w /app php:8.3-cli sh -c '
   apt-get update -qq && apt-get install -y -qq unzip
   curl -sSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
@@ -251,6 +322,7 @@ SYNTHIGY_TEST_ENDPOINT=http://localhost:7887 \
 SYNTHIGY_TEST_CLIENT_ID=... SYNTHIGY_TEST_CLIENT_SECRET=... \
 SYNTHIGY_TEST_AUDIENCE=https://synthigy.com \
   composer test:live
+# + SYNTHIGY_TEST_LOGIN_CLIENT_ID/_SECRET/_USER/_PASSWORD for the headless browser-login case
 ```
 
 `SYNTHIGY_TEST_TOKEN=<bearer>` works instead of the id/secret pair.
@@ -259,28 +331,6 @@ It covers token minting, schema, search/get, sqlTemplate, XSQL, batched
 `exec`, operator filtering, typed errors, and one write→read→delete round
 trip that creates and removes its own record (client-minted xid, cleaned
 up in a `finally`).
-
-The unit suite (70 tests) plus PHPStan level 8 run clean in a PHP 8.3
-container; there was no PHP interpreter installed in the authoring
-environment itself, hence the Docker recipe above.
-
-Beyond the unit suite, this SDK has also been exercised for real against
-a **live** dev server (`localhost:7887`, a throwaway `client_credentials`
-client named `synthigy-php-sdk-e2e`): `schema()` against the real
-127-entity model, `search()`/`sqlTemplate()`/`query()` (XSQL)/`exec()`
-(batch) against a real entity with real rows back, and the full
-`pull` → `gen` → `check` codegen pipeline including *running* the
-generated code. The one gotcha that verification surfaced was a
-platform-level OAuth audience default, not a bug in this SDK: a client
-must be linked to the platform API or `/data` answers 401.
-`composer test:live` itself — a committed, creds-gated PHPUnit class
-mirroring the Python SDK's integration suite — is not yet written; the
-verification above was ad hoc.
-
-Register a dedicated OAuth client for that future live suite (trusted
-confidential, `client_credentials`, linked to the platform API so its
-token mint can request the `/data`-capable audience) — never share
-identity with a live app.
 
 ## License
 

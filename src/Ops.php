@@ -37,8 +37,8 @@ function opGet(string $entity, ?array $args = null, mixed $selection = null): ar
 }
 
 /**
- * @param array<string,mixed> $data
- * @return array<string,mixed>
+ * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+ * @return array<mixed> ['count' => n], or the written record(s) with $returning
  */
 function opSync(string $entity, array $data, bool $returning = false): array
 {
@@ -47,8 +47,8 @@ function opSync(string $entity, array $data, bool $returning = false): array
 }
 
 /**
- * @param array<string,mixed> $data
- * @return array<string,mixed>
+ * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+ * @return array<mixed> ['count' => n], or the written record(s) with $returning
  */
 function opStack(string $entity, array $data, bool $returning = false): array
 {
@@ -170,6 +170,18 @@ function opRuntimeModel(): array
 function opDescribe(string $source): array
 {
     return ['op' => 'describe', 'source' => $source];
+}
+
+/**
+ * Compile several .xsql files into one IR; each is parsed on its own, so its
+ * buffer-level @namespace stays in it.
+ *
+ * @param list<array{path: string, source: string}> $files
+ * @return array{op: 'describe', sources: list<array{path: string, source: string}>}
+ */
+function opDescribeFiles(array $files): array
+{
+    return ['op' => 'describe', 'sources' => $files];
 }
 
 /**

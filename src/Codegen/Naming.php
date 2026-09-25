@@ -58,7 +58,7 @@ function camel(string $s): string
 }
 
 /**
- * Server-rendered pascal skin (docs/plans/PLAN-SCHEMA-SKINS-PROJECTION.md)
+ * Server-rendered pascal skin
  * for schema.entities[$name], falling back to the local guess.
  *
  * @param array<string,mixed>|null $schema

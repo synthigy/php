@@ -7,9 +7,14 @@ namespace Synthigy\Tests;
 use PHPUnit\Framework\TestCase;
 use Synthigy\Codegen\CodegenError;
 
+use function Synthigy\Codegen\cmdGen;
+use function Synthigy\Codegen\parseArgs;
+use function Synthigy\Codegen\readSources;
 use function Synthigy\Codegen\render;
 use function Synthigy\Codegen\resolveMember;
+use function Synthigy\Codegen\sourceHash;
 use function Synthigy\Codegen\validateOps;
+use function Synthigy\Codegen\xsqlFiles;
 
 final class CodegenTest extends TestCase
 {
@@ -167,6 +172,7 @@ final class CodegenTest extends TestCase
         self::assertStringContainsString('public static function overview(', $code);
         self::assertStringContainsString('final class Writes', $code);
         self::assertStringContainsString('public static function syncMovie(', $code);
+        self::assertStringContainsString('@param MovieInput|list<MovieInput> $data', $code);
         self::assertStringContainsString('public static function stackMovie(', $code);
         self::assertStringContainsString('public static function deleteMovie(', $code);
         // the mutation op in the IR (sync_movie) must be skipped, not rendered as a read method
@@ -203,5 +209,60 @@ final class CodegenTest extends TestCase
     {
         $this->expectException(CodegenError::class);
         render($this->sampleIr(), null, true, 'Generated\\Movies', 'movies.xsql');
+    }
+
+    public function testXsqlFilesRecursesSortedByRelativePathAndMerges(): void
+    {
+        $dir = sys_get_temp_dir() . '/synthigy-xsql-' . bin2hex(random_bytes(4));
+        mkdir($dir . '/b', 0o777, true);
+        file_put_contents($dir . '/b/z.xsql', "@workspace w2\nZ");
+        file_put_contents($dir . '/a.xsql', "@workspace w1\nA");
+        file_put_contents($dir . '/b.xsql', 'B');
+        $paths = xsqlFiles([$dir]);
+        $this->assertSame([$dir . '/a.xsql', $dir . '/b.xsql', $dir . '/b/z.xsql'], $paths);
+        $this->assertSame("@workspace w1\nA\n\nB\n\nZ", readSources($paths));
+    }
+
+    public function testBooleanFlagsNeverSwallowThePositional(): void
+    {
+        [$pos, $flags] = parseArgs(['--pull', 'xsql/', '--no-writes', 'more/', '--out', 'gen/ops.php']);
+        $this->assertSame(['xsql/', 'more/'], $pos);
+        $this->assertSame(['pull' => true, 'no-writes' => true, 'out' => 'gen/ops.php'], $flags);
+    }
+
+    public function testGenFromCachedIrIsOfflineAndCreatesTheOutDir(): void
+    {
+        $dir = sys_get_temp_dir() . '/synthigy-gen-' . bin2hex(random_bytes(4));
+        mkdir($dir . '/xsql', 0o777, true);
+        $source = "@search top_movies\nmovie\n  xid";
+        file_put_contents($dir . '/xsql/movies.xsql', $source);
+        $ir = $this->sampleIr();
+        $ir['sourceHash'] = sourceHash($source);
+        file_put_contents($dir . '/xsql/ops.ir.json', json_encode($ir));
+        $prev = getenv('SYNTHIGY_ENDPOINT');
+        putenv('SYNTHIGY_ENDPOINT');
+        try {
+            $this->assertSame(0, cmdGen([$dir . '/xsql', '--no-writes', '--out', $dir . '/gen/ops.php']));
+            $this->assertFileExists($dir . '/gen/ops.php');
+        } finally {
+            putenv($prev === false ? 'SYNTHIGY_ENDPOINT' : "SYNTHIGY_ENDPOINT={$prev}");
+        }
+    }
+
+    public function testGenAfterAnEditWithNoEndpointNamesTheEdit(): void
+    {
+        $dir = sys_get_temp_dir() . '/synthigy-gen-' . bin2hex(random_bytes(4));
+        mkdir($dir . '/xsql', 0o777, true);
+        file_put_contents($dir . '/xsql/movies.xsql', 'edited');
+        file_put_contents($dir . '/xsql/ops.ir.json', json_encode($this->sampleIr()));
+        $prev = getenv('SYNTHIGY_ENDPOINT');
+        putenv('SYNTHIGY_ENDPOINT');
+        try {
+            $this->expectException(CodegenError::class);
+            $this->expectExceptionMessageMatches('/revert the \.xsql edit/');
+            cmdGen([$dir . '/xsql', '--no-writes', '--out', $dir . '/gen/ops.php']);
+        } finally {
+            putenv($prev === false ? 'SYNTHIGY_ENDPOINT' : "SYNTHIGY_ENDPOINT={$prev}");
+        }
     }
 }

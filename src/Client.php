@@ -12,9 +12,8 @@ use Synthigy\Http\CurlTransport;
 use Synthigy\Http\HttpTransport;
 
 /**
- * A Synthigy /data client. CRUD + auth + codegen only — no watch/SSE (see
- * docs/plans/PLAN-PHP-SDK.md for why: PHP-FPM has no long-lived process to
- * hold a streaming connection).
+ * A Synthigy /data client. CRUD + auth + codegen only — no watch/SSE:
+ * PHP-FPM has no long-lived process to hold a streaming connection.
  *
  * Auth resolution, in order: an explicit $token (including ""  for an
  * authless dev server) > $clientId+$clientSecret (OAuth client
@@ -41,6 +40,7 @@ final class Client
 
     use Crud;
     use Schema;
+    use Login;
 
     private readonly string $endpoint;
     private readonly string $dataUrl;
@@ -51,9 +51,12 @@ final class Client
     private readonly ?string $defaultKeyFormat;
     private readonly ?float $defaultTimeoutSeconds;
     private readonly string $defaultAudience;
+    private readonly ?string $clientId;
+    private readonly ?string $clientSecret;
+    private readonly ?LoginStore $loginStore;
 
     public function __construct(
-        string $endpoint,
+        ?string $endpoint = null,
         ?string $token = null,
         ?string $clientId = null,
         ?string $clientSecret = null,
@@ -63,9 +66,16 @@ final class Client
         ?float $timeoutSeconds = null,
         ?string $audience = null,
         ?HttpTransport $transport = null,
+        ?LoginStore $loginStore = null,
     ) {
+        if ($endpoint === null || $endpoint === '') {
+            $endpoint = getenv('SYNTHIGY_ENDPOINT') ?: '';
+        }
         if ($endpoint === '') {
-            throw new SynthigyError('endpoint is required', 'INVALID_BODY');
+            throw new SynthigyError(
+                'no endpoint — pass one, or set SYNTHIGY_ENDPOINT (run under `synthigy exec`)',
+                'NO_ENDPOINT',
+            );
         }
         $this->endpoint = rtrim($endpoint, '/');
         $this->dataUrl = $this->endpoint . '/data';
@@ -73,6 +83,10 @@ final class Client
         $this->defaultActingAs = $actingAs;
         $this->defaultKeyFormat = $keyFormat;
         $this->defaultTimeoutSeconds = $timeoutSeconds;
+        // kept outside the auth chain: a static-token client can still be confidential for login
+        $this->clientId = $clientId;
+        $this->clientSecret = $clientSecret;
+        $this->loginStore = $loginStore;
         // A client_credentials mint naming no audience resolves to the
         // identity-only OIDC audience, not the /data-capable platform one, no
         // matter how the client is configured server-side. This SDK is the

@@ -27,6 +27,34 @@ final class ClientTest extends TestCase
         );
     }
 
+    public function testEndpointDefaultsToEnv(): void
+    {
+        $prev = getenv('SYNTHIGY_ENDPOINT');
+        putenv('SYNTHIGY_ENDPOINT=http://example.test/');
+        try {
+            $t = new FakeTransport();
+            $t->respondJson(200, ['results' => [['ok' => true, 'data' => null]]]);
+            (new Client(token: 't', transport: $t))->search('movie');
+            $this->assertSame('http://example.test/data', $t->requests[0]['url']);
+        } finally {
+            putenv($prev === false ? 'SYNTHIGY_ENDPOINT' : "SYNTHIGY_ENDPOINT={$prev}");
+        }
+    }
+
+    public function testNoEndpointIsTypedAndNotRetryable(): void
+    {
+        $prev = getenv('SYNTHIGY_ENDPOINT');
+        putenv('SYNTHIGY_ENDPOINT');
+        try {
+            new Client(token: 't', transport: new FakeTransport());
+            $this->fail('expected NO_ENDPOINT');
+        } catch (SynthigyError $e) {
+            $this->assertSame(['NO_ENDPOINT', 'validation', false], [$e->code, $e->category, $e->retryable]);
+        } finally {
+            putenv($prev === false ? 'SYNTHIGY_ENDPOINT' : "SYNTHIGY_ENDPOINT={$prev}");
+        }
+    }
+
     public function testSearchEnvelopeAndDefaultEmpty(): void
     {
         $t = new FakeTransport();
@@ -97,6 +125,21 @@ final class ClientTest extends TestCase
         $body = $t->lastRequestBody();
         self::assertSame('get', $body['operations'][0]['op']);
         self::assertSame(['xid' => 'm-1'], $body['operations'][0]['args']);
+    }
+
+    public function testSyncAndStackTakeAListInOneOperation(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => ['count' => 2]]]]);
+        $c = $this->client($t);
+        self::assertSame(['count' => 2], $c->sync('Movie', [['title' => 'A'], ['title' => 'B']]));
+        $ops = $t->lastRequestBody()['operations'];
+        self::assertCount(1, $ops);
+        self::assertSame([['title' => 'A'], ['title' => 'B']], $ops[0]['data']);
+
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => [['xid' => 'a'], ['xid' => 'b']]]]]);
+        self::assertSame([['xid' => 'a'], ['xid' => 'b']], $c->stack('Movie', [['xid' => 'a'], ['xid' => 'b']], returning: true));
+        self::assertSame('stack', $t->lastRequestBody()['operations'][0]['op']);
     }
 
     public function testSyncStackDeleteSlicePurge(): void

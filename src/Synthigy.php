@@ -33,7 +33,7 @@ final class Synthigy
      * auth only) holds no live connection to close.
      */
     public static function connect(
-        string $endpoint,
+        ?string $endpoint = null,
         ?string $token = null,
         ?string $clientId = null,
         ?string $clientSecret = null,
@@ -42,6 +42,7 @@ final class Synthigy
         ?string $keyFormat = null,
         ?float $timeoutSeconds = null,
         ?string $audience = null,
+        ?LoginStore $loginStore = null,
     ): Client {
         return self::$default = new Client(
             endpoint: $endpoint,
@@ -53,6 +54,7 @@ final class Synthigy
             keyFormat: $keyFormat,
             timeoutSeconds: $timeoutSeconds,
             audience: $audience,
+            loginStore: $loginStore,
         );
     }
 
@@ -91,8 +93,8 @@ final class Synthigy
     }
 
     /**
-     * @param array<string,mixed> $data
-     * @return array<string,mixed>
+     * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+     * @return array<mixed> ['count' => n], or the written record(s) with $returning
      */
     public static function sync(string $entity, array $data, ?string $actingAs = null, ?string $keyFormat = null, bool $returning = false): array
     {
@@ -100,8 +102,8 @@ final class Synthigy
     }
 
     /**
-     * @param array<string,mixed> $data
-     * @return array<string,mixed>
+     * @param array<string,mixed>|list<array<string,mixed>> $data one record, or a list of them in one operation (bulk import)
+     * @return array<mixed> ['count' => n], or the written record(s) with $returning
      */
     public static function stack(string $entity, array $data, ?string $actingAs = null, ?string $keyFormat = null, bool $returning = false): array
     {
@@ -202,6 +204,18 @@ final class Synthigy
         return self::client()->lint($source, $entity, $op);
     }
 
+    /**
+     * Compile an XSQL source to the wire operation the engine would execute
+     * (POST /compile), without executing it.
+     *
+     * @param array<string,mixed>|null $params
+     * @return array<string,mixed>
+     */
+    public static function compile(string $source, ?array $params = null, string $op = 'search'): array
+    {
+        return self::client()->compile($source, $params, $op);
+    }
+
     /** @return array<string,mixed> */
     public static function deployedModel(): array
     {
@@ -227,6 +241,24 @@ final class Synthigy
     public static function onboardComplete(string $ticket): array
     {
         return self::client()->onboardComplete($ticket);
+    }
+
+    /** @return array{url: string} */
+    public static function loginStart(string $redirectUri, string $returnTo = '/', string $scope = 'openid', ?string $publicEndpoint = null): array
+    {
+        return self::client()->loginStart($redirectUri, $returnTo, $scope, $publicEndpoint);
+    }
+
+    /** @return array{user: array{xid: string, name: ?string, scopes: list<string>}, tokens: array<string,mixed>, return_to: string} */
+    public static function loginComplete(string $code, string $state, string $redirectUri): array
+    {
+        return self::client()->loginComplete($code, $state, $redirectUri);
+    }
+
+    /** @return array{return_to: string}|null */
+    public static function loginCancel(string $state): ?array
+    {
+        return self::client()->loginCancel($state);
     }
 
     public static function token(?string $audience = null): string

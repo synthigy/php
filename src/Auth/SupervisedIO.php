@@ -8,8 +8,7 @@ use Synthigy\SynthigyError;
 
 /**
  * Process-wide singleton for the `SYNTHIGY_SUPERVISED=1` `auth.token`
- * JSON-RPC-over-stdio protocol (docs/plans/PLAN-EXEC-IDENTITY.md steps
- * 3-4). CLI-only: a script run under `synthigy exec`/`agent` (or a
+ * JSON-RPC-over-stdio protocol. CLI-only: a script run under `synthigy exec`/`agent` (or a
  * robotics commander) owns the process's stdio and answers `auth.token`
  * asks over it, so the SDK never mints a token locally under this mode.
  * Meaningless under PHP-FPM (no stdio to a supervising parent) — do not
