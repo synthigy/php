@@ -21,6 +21,9 @@ use Synthigy\Http\HttpTransport;
  * the SYNTHIGY_TOKEN env var (a snapshot, not a live source) > a
  * SynthigyError(code: NO_TOKEN) that teaches the fix.
  *
+ * Client-credentials tokens outlive the request in $tokenStore: a
+ * FileTokenStore by default, false keeps them in this process only.
+ *
  * $audience binds a default `client_credentials` audience for every /data
  * call this Client makes — set it to the platform's `/data` audience
  * (e.g. `https://synthigy.com`) when the server requires one explicitly
@@ -67,6 +70,7 @@ final class Client
         ?string $audience = null,
         ?HttpTransport $transport = null,
         ?LoginStore $loginStore = null,
+        TokenStore|false|null $tokenStore = null,
     ) {
         if ($endpoint === null || $endpoint === '') {
             $endpoint = getenv('SYNTHIGY_ENDPOINT') ?: '';
@@ -107,6 +111,7 @@ final class Client
                 $clientId,
                 $clientSecret,
                 $scope,
+                $tokenStore === false ? null : ($tokenStore ?? new FileTokenStore()),
             );
             $this->staticToken = null;
         } elseif (getenv('SYNTHIGY_SUPERVISED') === '1') {

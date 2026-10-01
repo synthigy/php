@@ -43,6 +43,7 @@ final class Synthigy
         ?float $timeoutSeconds = null,
         ?string $audience = null,
         ?LoginStore $loginStore = null,
+        TokenStore|false|null $tokenStore = null,
     ): Client {
         return self::$default = new Client(
             endpoint: $endpoint,
@@ -55,6 +56,7 @@ final class Synthigy
             timeoutSeconds: $timeoutSeconds,
             audience: $audience,
             loginStore: $loginStore,
+            tokenStore: $tokenStore,
         );
     }
 

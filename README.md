@@ -114,7 +114,8 @@ server logs). Discriminate on `->code`, never the message.
 
 - Client credentials (`clientId`+`clientSecret`): tokens minted from
   `/oauth/token`, cached per audience, refreshed 30s before expiry, one
-  automatic clear-and-retry on 401.
+  automatic clear-and-retry on 401. The cache outlives the request — see
+  [Reusing tokens across requests](#reusing-tokens-across-requests).
 - Static `token: '...'` for scripts/tests (`token: ''` for authless dev).
 - With none of the above, resolution continues: under
   `SYNTHIGY_SUPERVISED=1` the SDK asks its supervising parent
@@ -137,6 +138,47 @@ server logs). Discriminate on `->code`, never the message.
   `search()`/`sync()`/etc. call. `Client::token($audience)` still accepts
   a per-call override for minting tokens for a *different* audience (e.g.
   a third-party service Synthigy federates for).
+
+### Reusing tokens across requests
+
+PHP forgets everything between requests, so a client that kept its token only
+in memory would mint a new one on every page view. Client-credentials tokens
+therefore go to a `TokenStore`, and every request reuses the token until 30s
+before it expires. The default is a `FileTokenStore`: one `0600` file per token
+in a `0700` directory under the system temp dir, one directory per OS user.
+Nothing to configure.
+
+- File names are an HMAC of the endpoint, client, scope and audience keyed by
+  the client secret, so a token is only reused by the credentials that minted
+  it, and a rotated secret mints a new one.
+- A 401 deletes the stored token, so every worker mints a fresh one.
+- The store is a cache, never a failure: if the directory can't be created, is
+  a symlink, or belongs to another user — or a custom store throws — the SDK
+  mints per request instead.
+- `tokenStore: new FileTokenStore('/var/cache/my-app')` picks the directory;
+  `tokenStore: false` keeps tokens in the process only.
+
+Any shared cache works. APCu, shared by every PHP-FPM worker on the host:
+
+```php
+final class ApcuTokenStore implements Synthigy\TokenStore
+{
+    public function get(string $key): ?array
+    {
+        $v = apcu_fetch('synthigy:' . $key, $ok);
+        return $ok && is_array($v) ? $v : null;
+    }
+    public function put(string $key, string $token, float $expiresAt): void
+    {
+        apcu_store('synthigy:' . $key, ['token' => $token, 'expires_at' => $expiresAt],
+            max(1, (int)($expiresAt - time())));
+    }
+    public function delete(string $key): void { apcu_delete('synthigy:' . $key); }
+}
+
+Synthigy::connect(clientId: 'my-app', clientSecret: getenv('APP_SECRET'),
+    tokenStore: new ApcuTokenStore());
+```
 
 ### Logging users in (`loginStart` / `loginComplete`)
 

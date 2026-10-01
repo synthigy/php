@@ -3,6 +3,20 @@
 All notable changes to `synthigy/sdk` (Packagist). Follows
 [semver](https://semver.org). Pre-1.0: breaking changes can land on minor bumps.
 
+## 0.2.1
+
+### Added
+- **Client-credentials tokens are reused across requests.** They were cached in
+  memory only, and PHP starts every request empty, so each page view minted a
+  new token (a round trip to `/oauth/token` per request). Tokens now go to a
+  `TokenStore`, passed as `tokenStore:` to `Synthigy::connect()` / `new Client()`.
+  The default `FileTokenStore` keeps them in a per-user `0700` directory under
+  the system temp dir; `false` restores in-process only. Entries are keyed by an
+  HMAC of endpoint, client, scope and audience under the client secret, a 401
+  deletes the stored token, and an unusable directory — or any store that
+  throws — falls back to minting.
+  The README shows an APCu store.
+
 ## 0.2.0
 
 ### Added

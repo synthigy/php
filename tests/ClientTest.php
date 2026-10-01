@@ -331,6 +331,7 @@ final class ClientTest extends TestCase
             clientId: 'cid',
             clientSecret: 'secret',
             transport: $t,
+            tokenStore: false,
         );
 
         $t->respondJson(200, ['access_token' => 'tok-1', 'expires_in' => 3600]); // oauth
@@ -357,6 +358,7 @@ final class ClientTest extends TestCase
             clientId: 'cid', clientSecret: 'secret',
             audience: 'https://synthigy.example.test',
             transport: $t,
+            tokenStore: false,
         );
         $t->respondJson(200, ['access_token' => 'tok', 'expires_in' => 3600]);
         $t->respondJson(200, ['results' => [['ok' => true, 'data' => []]]]);
@@ -376,6 +378,7 @@ final class ClientTest extends TestCase
             clientId: 'cid', clientSecret: 'secret',
             audience: 'https://synthigy.example.test',
             transport: $t,
+            tokenStore: false,
         );
         $t->respondJson(200, ['access_token' => 'tok-other', 'expires_in' => 3600]);
 
