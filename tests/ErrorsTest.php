@@ -23,11 +23,27 @@ final class ErrorsTest extends TestCase
         $this->assertTrue($e->retryable);
     }
 
-    public function testUnknownCodeFallsBackToInternal(): void
+    public function testUnknownCodeIsInternalButNotRetryable(): void
     {
         $e = new SynthigyError('mystery', 'SOME_FUTURE_CODE');
         self::assertSame('internal', $e->category);
-        self::assertTrue($e->retryable);
+        self::assertFalse($e->retryable);
+    }
+
+    public function testServerRetryableFlagWins(): void
+    {
+        self::assertTrue(SynthigyError::fromServer(['code' => 'DB_UNAVAILABLE', 'retryable' => true])->retryable);
+        self::assertFalse(SynthigyError::fromServer(['code' => 'DB_UNAVAILABLE'])->retryable);
+        self::assertFalse(SynthigyError::fromServer(['code' => 'INTERNAL_ERROR', 'retryable' => false])->retryable);
+    }
+
+    public function testRelationDenialIsIam(): void
+    {
+        $e = SynthigyError::fromServer(['code' => 'RELATION_FORBIDDEN', 'message' => 'no', 'relation' => 'r1']);
+        self::assertSame(['iam', false], [$e->category, $e->retryable]);
+        foreach (['ATTRIBUTE_FORBIDDEN', 'ROW_FORBIDDEN', 'CREATE_FORBIDDEN', 'DELETE_FORBIDDEN', 'SLOT_OCCUPIED'] as $code) {
+            self::assertSame('iam', (new SynthigyError('x', $code))->category, $code);
+        }
     }
 
     public function testNetworkAndRateLimitAndInternalAreRetryable(): void

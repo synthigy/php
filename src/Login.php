@@ -8,6 +8,8 @@ namespace Synthigy;
  * Browser login — OIDC authorization code + PKCE for a confidential server.
  * Mixed into Client. The SDK owns the protocol; sessions, cookies and
  * redirects stay the app's.
+ *
+ * @phpstan-import-type PendingLogin from LoginStore
  */
 trait Login
 {
@@ -57,8 +59,7 @@ trait Login
      */
     public function loginComplete(string $code, string $state, string $redirectUri): array
     {
-        $store = $this->requireLogin();
-        $pending = $state !== '' ? $store->take($state) : null;
+        $pending = self::takePending($this->requireLogin(), $state);
         if ($pending === null) {
             throw new SynthigyError(
                 'unknown or expired login state: the store never saw it, it was already '
@@ -134,8 +135,19 @@ trait Login
         if ($this->loginStore === null) {
             throw self::noLoginStoreError();
         }
-        $pending = $state !== '' ? $this->loginStore->take($state) : null;
+        $pending = self::takePending($this->loginStore, $state);
         return $pending === null ? null : ['return_to' => (string)$pending['return_to']];
+    }
+
+    /**
+     * Take a pending login, refusing one older than LoginStore::TTL_SECONDS even when the store kept it.
+     *
+     * @return PendingLogin|null
+     */
+    private static function takePending(LoginStore $store, string $state): ?array
+    {
+        $pending = $state !== '' ? $store->take($state) : null;
+        return $pending !== null && (int)$pending['created_at'] > time() - LoginStore::TTL_SECONDS ? $pending : null;
     }
 
     private function requireLogin(): LoginStore

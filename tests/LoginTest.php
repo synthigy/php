@@ -185,6 +185,42 @@ final class LoginTest extends TestCase
         }
     }
 
+    public function testExpiredLoginIsRefusedEvenWhenTheStoreKeptIt(): void
+    {
+        $forever = new class implements LoginStore {
+            /** @var array<string, array{code_verifier: string, nonce: string, return_to: string, created_at: int}> */
+            private array $pending = [];
+
+            public function put(string $state, array $login): void
+            {
+                $this->pending[$state] = $login;
+            }
+
+            public function take(string $state): ?array
+            {
+                $login = $this->pending[$state] ?? null;
+                unset($this->pending[$state]);
+                return $login;
+            }
+        };
+        $old = ['code_verifier' => 'v', 'nonce' => 'n', 'return_to' => '/back', 'created_at' => time() - LoginStore::TTL_SECONDS - 1];
+        $forever->put('done', $old);
+        $forever->put('cancelled', $old);
+        $t = new FakeTransport();
+        $client = $this->client($t, $forever);
+
+        $this->assertSame('LOGIN_STATE_UNKNOWN', self::codeOf(fn () => $client->loginComplete('the-code', 'done', self::CB)));
+        $this->assertNull($client->loginCancel('cancelled'));
+        $this->assertCount(0, $t->requests, 'an expired login never reaches the IdP');
+    }
+
+    public function testDefaultTtlOutlivesTheServersLoginWindow(): void
+    {
+        $store = new MemoryLoginStore();
+        $store->put('slow', ['code_verifier' => 'v', 'nonce' => 'n', 'return_to' => '/', 'created_at' => time() - 9 * 60]);
+        $this->assertNotNull($store->take('slow'), 'a 9-minute login must survive the 8-minute server window');
+    }
+
     public function testCancelIsOneShotAndStoreExpires(): void
     {
         $client = $this->client(new FakeTransport(), new MemoryLoginStore());

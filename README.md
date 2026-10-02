@@ -110,12 +110,20 @@ class redeclare it with an incompatible type), `->diagnostics`,
 `->requestId` (matches the `X-Request-Id` the SDK sends — correlate with
 server logs). Discriminate on `->code`, never the message.
 
+`->retryable` is true for `network`, `rate_limit` and `internal` codes, and
+for any error the server marks retryable. A code this SDK doesn't know yet
+is category `internal` but not retryable.
+
 ## Auth
 
 - Client credentials (`clientId`+`clientSecret`): tokens minted from
   `/oauth/token`, cached per audience, refreshed 30s before expiry, one
   automatic clear-and-retry on 401. The cache outlives the request — see
   [Reusing tokens across requests](#reusing-tokens-across-requests).
+  A refused mint is `INVALID_CLIENT` (wrong id or secret, inactive client),
+  `INVALID_SCOPE`, or `INVALID_AUDIENCE` (the client isn't linked to the
+  API), else `UNAUTHORIZED`; the message carries the server's
+  `error_description`.
 - Static `token: '...'` for scripts/tests (`token: ''` for authless dev).
 - With none of the above, resolution continues: under
   `SYNTHIGY_SUPERVISED=1` the SDK asks its supervising parent
@@ -189,24 +197,15 @@ in-flight login lives in a `LoginStore` you pass as `loginStore:` —
 `put($state, $login)` and one-shot `take($state)`.
 
 Under PHP-FPM every request is a new process, so keep logins in the
-session. `MemoryLoginStore` is for one long-lived process only (tests,
-RoadRunner, Swoole); under FPM every login would fail `LOGIN_STATE_UNKNOWN`.
+session: `SessionLoginStore` does, and drops logins older than its TTL
+(`ttlSeconds:`, default 600). `MemoryLoginStore` is for one long-lived
+process only (tests, RoadRunner, Swoole); under FPM every login would fail
+`LOGIN_STATE_UNKNOWN`.
 
 ```php
-final class SessionLoginStore implements Synthigy\LoginStore
-{
-    public function put(string $state, array $login): void { $_SESSION['synthigy_login'][$state] = $login; }
-    public function take(string $state): ?array
-    {
-        $login = $_SESSION['synthigy_login'][$state] ?? null;
-        unset($_SESSION['synthigy_login'][$state]);
-        return $login;
-    }
-}
-
 session_start();
 Synthigy::connect(clientId: 'my-app', clientSecret: getenv('APP_SECRET'),
-    loginStore: new SessionLoginStore());
+    loginStore: new Synthigy\SessionLoginStore());
 
 // /login
 header('Location: ' . Synthigy::loginStart(CALLBACK, returnTo: $_GET['returnTo'] ?? '/')['url']);
@@ -224,8 +223,13 @@ header('Location: ' . $done['return_to']);
 - `$done['user']['xid']` is read from the id_token — no `/data` lookup. Pass
   it as `actingAs:` to act on the user's behalf.
 - No store → `NO_LOGIN_STORE`; no `clientSecret` →
-  `LOGIN_REQUIRES_CONFIDENTIAL_CLIENT`. Other codes: `LOGIN_STATE_UNKNOWN`,
-  `LOGIN_NONCE_MISMATCH`, `LOGIN_EXCHANGE_FAILED` (with `->status`).
+  `LOGIN_REQUIRES_CONFIDENTIAL_CLIENT`; `SessionLoginStore` without
+  `session_start()` → `SESSION_NOT_STARTED`. Other codes:
+  `LOGIN_STATE_UNKNOWN`, `LOGIN_NONCE_MISMATCH`, `LOGIN_EXCHANGE_FAILED`
+  (with `->status`).
+- Don't make the session cookie `SameSite=Strict`: the IdP's redirect back is
+  a cross-site navigation, a Strict cookie isn't sent on it, and the callback
+  fails `LOGIN_STATE_UNKNOWN`.
 - `publicEndpoint:` when the browser reaches the IdP on a different URL than
   PHP does (containers, reverse proxies).
 - The code exchange never retries: an authorization code is one-shot.

@@ -17,6 +17,13 @@ final class TokenManager implements TokenSource
 {
     private const EXPIRY_BUFFER_SECONDS = 30;
 
+    /** RFC 6749 §5.2 / RFC 8707 refusals with their own code; any other refusal is UNAUTHORIZED. */
+    private const REFUSAL_CODES = [
+        'invalid_client' => 'INVALID_CLIENT',
+        'invalid_scope' => 'INVALID_SCOPE',
+        'invalid_target' => 'INVALID_AUDIENCE',
+    ];
+
     /** @var array<string, array{token: string, expiresAt: float}> */
     private array $tokens = [];
 
@@ -66,11 +73,7 @@ final class TokenManager implements TokenSource
         );
 
         if ($resp->status < 200 || $resp->status >= 300) {
-            throw new SynthigyError(
-                "Token request failed ({$resp->status}): {$resp->body}",
-                'UNAUTHORIZED',
-                status: $resp->status,
-            );
+            throw self::refusal($resp->status, $resp->body);
         }
 
         $decoded = json_decode($resp->body, true);
@@ -106,6 +109,25 @@ final class TokenManager implements TokenSource
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    private static function refusal(int $status, string $body): SynthigyError
+    {
+        $oauth = json_decode($body, true);
+        $error = is_array($oauth) && is_string($oauth['error'] ?? null) ? $oauth['error'] : null;
+        if ($error === null) {
+            return new SynthigyError("Token request failed ({$status}): {$body}", 'UNAUTHORIZED', status: $status);
+        }
+        $description = is_string($oauth['error_description'] ?? null) && $oauth['error_description'] !== ''
+            ? " — {$oauth['error_description']}" : '';
+        $code = self::REFUSAL_CODES[$error] ?? 'UNAUTHORIZED';
+        return new SynthigyError(
+            "Token request refused ({$status}): {$error}{$description}",
+            $code,
+            $oauth,
+            hint: $code === 'INVALID_CLIENT' ? 'check the client id and secret, and that the client is active' : null,
+            status: $status,
+        );
     }
 
     private static function fresh(float $expiresAt): bool

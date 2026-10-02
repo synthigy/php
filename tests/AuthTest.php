@@ -74,17 +74,34 @@ final class AuthTest extends TestCase
         self::assertCount(2, $t->requests);
     }
 
-    public function testNonSuccessStatusRaisesUnauthorized(): void
+    /** @return array<string, array{int, string, string, string}> */
+    public static function refusals(): array
+    {
+        return [
+            'wrong secret' => [401, '{"error":"invalid_client","error_description":"Client authentication failed"}',
+                'INVALID_CLIENT', 'Token request refused (401): invalid_client — Client authentication failed'],
+            'bad scope' => [400, '{"error":"invalid_scope"}', 'INVALID_SCOPE', 'Token request refused (400): invalid_scope'],
+            'unlinked audience' => [400, '{"error":"invalid_target","error_description":"Client is not authorized for audience x"}',
+                'INVALID_AUDIENCE', 'Token request refused (400): invalid_target — Client is not authorized for audience x'],
+            'other oauth error' => [400, '{"error":"unauthorized_client"}', 'UNAUTHORIZED', 'Token request refused (400): unauthorized_client'],
+            'not json' => [502, 'Bad Gateway', 'UNAUTHORIZED', 'Token request failed (502): Bad Gateway'],
+        ];
+    }
+
+    /** @dataProvider refusals */
+    public function testRefusedMintIsTyped(int $status, string $body, string $code, string $message): void
     {
         $t = new FakeTransport();
-        $t->respond(new \Synthigy\Http\HttpResponse(400, [], '{"error":"invalid_client"}'));
+        $t->respond(new \Synthigy\Http\HttpResponse($status, [], $body));
         $tm = new TokenManager($t, 'https://x.test/oauth/token', 'bad', 'creds');
 
         try {
             $tm->getToken(null);
             self::fail('expected SynthigyError');
         } catch (SynthigyError $e) {
-            self::assertSame('UNAUTHORIZED', $e->code);
+            self::assertSame([$code, 'auth', false, $status], [$e->code, $e->category, $e->retryable, $e->status]);
+            self::assertSame($message, $e->getMessage());
+            self::assertSame($code === 'INVALID_CLIENT', $e->hint !== null);
         }
     }
 

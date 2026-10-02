@@ -14,6 +14,12 @@ namespace Synthigy;
  */
 interface LoginStore
 {
+    /**
+     * How long a login may take from loginStart() to the callback; loginComplete() refuses older ones whatever the store keeps.
+     * Must exceed the server's 8-minute login window, or slow logins fail LOGIN_STATE_UNKNOWN.
+     */
+    public const TTL_SECONDS = 600;
+
     /** @param PendingLogin $login */
     public function put(string $state, array $login): void;
 

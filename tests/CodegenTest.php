@@ -14,6 +14,7 @@ use function Synthigy\Codegen\render;
 use function Synthigy\Codegen\resolveMember;
 use function Synthigy\Codegen\sourceHash;
 use function Synthigy\Codegen\validateOps;
+use function Synthigy\Codegen\warnStaleSchema;
 use function Synthigy\Codegen\xsqlFiles;
 
 final class CodegenTest extends TestCase
@@ -264,5 +265,29 @@ final class CodegenTest extends TestCase
         } finally {
             putenv($prev === false ? 'SYNTHIGY_ENDPOINT' : "SYNTHIGY_ENDPOINT={$prev}");
         }
+    }
+
+    public function testWarnStaleSchemaOnlyWhenTheStampMoved(): void
+    {
+        $server = sys_get_temp_dir() . '/synthigy-wk-' . bin2hex(random_bytes(4));
+        mkdir($server . '/.well-known', 0777, true);
+        file_put_contents($server . '/.well-known/synthigy',
+            '{"datasets":{"A":"2026-09-15T09:47:15.698+02:00","B":"2026-10-01T00:00:00Z"}}');
+        $schema = $server . '/schema.json';
+        $run = static function (string $endpoint) use ($schema): string {
+            $out = fopen('php://memory', 'w+');
+            self::assertIsResource($out);
+            warnStaleSchema($endpoint, $schema, $out);
+            rewind($out);
+            return (string)stream_get_contents($out);
+        };
+
+        file_put_contents($schema, '{"datasets":{"A":{"deployed-at":"2026-09-15T07:47:15.698Z"},'
+            . '"B":{"deployed-at":"2026-10-01T00:00:00Z"}}}');
+        self::assertSame('', $run($server));
+
+        file_put_contents($schema, '{"datasets":{"A":{"deployed-at":"2026-09-15T07:47:15.698Z"}}}');
+        self::assertStringContainsString('stale', $run($server));
+        self::assertSame('', $run(''));
     }
 }

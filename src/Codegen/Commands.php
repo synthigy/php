@@ -139,6 +139,50 @@ function resolveSchemaPath(string $dir, ?string $override): ?string
 }
 
 /**
+ * One line on $out when the schema's deploy stamp is older than the model at
+ * /.well-known/synthigy. Silent on any failure: generation stays offline-capable.
+ *
+ * @param resource $out
+ */
+function warnStaleSchema(string $endpoint, ?string $schemaPath, $out = STDERR): void
+{
+    if ($endpoint === '' || $schemaPath === null || !is_file($schemaPath)) {
+        return;
+    }
+    $local = json_decode((string)file_get_contents($schemaPath), true)['datasets'] ?? [];
+    $ctx = stream_context_create(['http' => ['timeout' => 2, 'ignore_errors' => false]]);
+    $body = @file_get_contents(rtrim($endpoint, '/') . '/.well-known/synthigy', false, $ctx);
+    if (!is_string($body)) {
+        return;
+    }
+    $remote = json_decode($body, true)['datasets'] ?? null;
+    if (!is_array($remote) || !is_array($local)) {
+        return;
+    }
+    $instant = static function ($s) {
+        try {
+            return is_string($s) ? (new \DateTimeImmutable($s))->format('U.u') : $s;
+        } catch (\Exception) {
+            return $s;
+        }
+    };
+    $changed = 0;
+    foreach ($remote as $id => $at) {
+        if (!isset($local[$id]) || $instant($local[$id]['deployed-at'] ?? null) !== $instant($at)) {
+            $changed++;
+        }
+    }
+    foreach ($local as $id => $_) {
+        if (!array_key_exists($id, $remote)) {
+            $changed++;
+        }
+    }
+    if ($changed > 0) {
+        fwrite($out, "warning: {$schemaPath} is stale against {$endpoint} ({$changed} datasets changed since the pull) — re-run with --pull\n");
+    }
+}
+
+/**
  * @param array<string, string|true> $flags
  */
 function resolveEndpoint(array $flags): string
@@ -181,9 +225,10 @@ function cmdGen(array $argv): int
     $ir = loadIr($dir, $source, readFiles($paths, $dir), $endpoint, $forcePull);
 
     $schema = null;
+    $explicit = is_string($flags['schema'] ?? null) ? $flags['schema'] : null;
+    $schemaPath = resolveSchemaPath($dir, $explicit);
+    $pulled = false;
     if ($writes) {
-        $explicit = is_string($flags['schema'] ?? null) ? $flags['schema'] : null;
-        $schemaPath = resolveSchemaPath($dir, $explicit);
         if ($explicit === null && ($schemaPath === null || $forcePull)) {
             if ($endpoint === '') {
                 throw new CodegenError(
@@ -193,6 +238,7 @@ function cmdGen(array $argv): int
             }
             $schemaPath = $dir . '/schema.json';
             pullSchema($endpoint, $schemaPath);
+            $pulled = true;
         }
         if ($schemaPath === null) {
             throw new CodegenError("no schema found in {$dir} — pass --schema, or use --no-writes");
@@ -202,6 +248,9 @@ function cmdGen(array $argv): int
             throw new CodegenError("failed to parse schema: {$schemaPath}");
         }
         $schema = $decoded;
+    }
+    if (!$pulled) {
+        warnStaleSchema($endpoint, $schemaPath);
     }
 
     $single = count($pos) === 1 && !is_dir($pos[0]);

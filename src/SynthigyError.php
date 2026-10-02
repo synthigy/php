@@ -10,6 +10,8 @@ namespace Synthigy;
  *
  * Always present: message (getMessage()), code, category, retryable.
  * The rest are populated only when the server (or transport) included them.
+ * A code missing from the table is category internal, retryable only when
+ * the server marked the error retryable.
  */
 final class SynthigyError extends \RuntimeException
 {
@@ -29,6 +31,9 @@ final class SynthigyError extends \RuntimeException
         'NO_LOGIN_STORE' => 'auth',
         'LOGIN_NONCE_MISMATCH' => 'auth',
         'LOGIN_EXCHANGE_FAILED' => 'auth',
+        'INVALID_CLIENT' => 'auth',
+        'INVALID_SCOPE' => 'auth',
+        'INVALID_AUDIENCE' => 'auth',
         'NO_ENDPOINT' => 'validation',
         // iam — RBAC/RLS denial, caller lacks permission
         'FORBIDDEN' => 'iam',
@@ -36,6 +41,12 @@ final class SynthigyError extends \RuntimeException
         'ENTITY_FORBIDDEN' => 'iam',
         'ENTITY_NOT_READABLE' => 'iam',
         'RELATION_NOT_READABLE' => 'iam',
+        'RELATION_FORBIDDEN' => 'iam',
+        'ATTRIBUTE_FORBIDDEN' => 'iam',
+        'ROW_FORBIDDEN' => 'iam',
+        'CREATE_FORBIDDEN' => 'iam',
+        'DELETE_FORBIDDEN' => 'iam',
+        'SLOT_OCCUPIED' => 'iam',
         // validation — the caller's request shape is invalid
         'INVALID_BODY' => 'validation',
         'NO_OPERATIONS' => 'validation',
@@ -73,6 +84,7 @@ final class SynthigyError extends \RuntimeException
         'RETURN_URL_NOT_REGISTERED' => 'validation',
         'LOGIN_STATE_UNKNOWN' => 'validation',
         'LOGIN_REQUIRES_CONFIDENTIAL_CLIENT' => 'validation',
+        'SESSION_NOT_STARTED' => 'validation',
         // not_found — referenced entity/relation/record doesn't exist
         'UNKNOWN_ENTITY' => 'not_found',
         'UNKNOWN_RELATION' => 'not_found',
@@ -92,6 +104,7 @@ final class SynthigyError extends \RuntimeException
         'INTERNAL_ERROR' => 'internal',
         'OPERATION_ERROR' => 'internal',
         'HTTP_ERROR' => 'internal',
+        'OPERATION_FAILED' => 'internal',
     ];
 
     private const RETRYABLE_CATEGORIES = ['network', 'rate_limit', 'internal'];
@@ -150,11 +163,13 @@ final class SynthigyError extends \RuntimeException
         mixed $start = null,
         mixed $end = null,
         ?array $diagnostics = null,
+        ?bool $retryable = null,
     ) {
         parent::__construct($message);
         $this->code = $code;
         $this->category = self::CATEGORIES[$code] ?? 'internal';
-        $this->retryable = in_array($this->category, self::RETRYABLE_CATEGORIES, true);
+        $this->retryable = $retryable
+            ?? (isset(self::CATEGORIES[$code]) && in_array($this->category, self::RETRYABLE_CATEGORIES, true));
         $this->details = $details;
         $this->hint = $hint;
         $this->available = $available;
@@ -212,6 +227,7 @@ final class SynthigyError extends \RuntimeException
             start: $err['start'] ?? null,
             end: $err['end'] ?? null,
             diagnostics: is_array($err['diagnostics'] ?? null) ? array_values($err['diagnostics']) : null,
+            retryable: is_bool($err['retryable'] ?? null) ? $err['retryable'] : null,
         );
     }
 

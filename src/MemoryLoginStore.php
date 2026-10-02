@@ -18,7 +18,7 @@ final class MemoryLoginStore implements LoginStore
     /** @var array<string, PendingLogin> */
     private array $pending = [];
 
-    public function __construct(private readonly int $ttlSeconds = 300)
+    public function __construct(private readonly int $ttlSeconds = LoginStore::TTL_SECONDS)
     {
     }
 
