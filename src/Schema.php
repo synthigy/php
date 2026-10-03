@@ -90,6 +90,17 @@ trait Schema
         return is_array($operation) ? $operation : [];
     }
 
+    /**
+     * Who a call runs as, after actingAs: xid, name, active, superuser, roles, groups, and client {id, trusted}.
+     *
+     * @return array<string,mixed>
+     */
+    public function whoami(?string $actingAs = null): array
+    {
+        $data = $this->execOne(opWhoami(), $actingAs);
+        return is_array($data) ? $data : [];
+    }
+
     /** @return array<string,mixed> */
     public function deployedModel(): array
     {

@@ -154,6 +154,12 @@ function opDestroy(string $datasetXid): array
     return ['op' => 'delete', 'entity' => 'dataset', 'data' => ['xid' => $datasetXid]];
 }
 
+/** @return array{op: 'whoami'} */
+function opWhoami(): array
+{
+    return ['op' => 'whoami'];
+}
+
 /** @return array{op: 'deployed-model'} */
 function opDeployedModel(): array
 {

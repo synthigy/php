@@ -3,6 +3,27 @@
 All notable changes to `synthigy/sdk` (Packagist). Follows
 [semver](https://semver.org). Pre-1.0: breaking changes can land on minor bumps.
 
+## 0.2.3
+
+### Added
+- **`Synthigy::whoami(actingAs:)`** (and `$client->whoami()`) — who a call
+  runs as: xid, name, active, superuser, roles (group-conferred included),
+  groups, and `client` `{id, trusted}`, where `trusted` means this client may
+  act as users. Needs engine v0.2.11 or newer.
+
+### Removed
+- **`synthigy-codegen pull`.** It wrote `./schema.json` in the working
+  directory while `gen` reads `schema.json` beside the `.xsql` files, so a pull
+  from the project root left the real one stale. `gen --pull` refreshes the
+  file `gen` reads; `synthigy schema pull` writes the same `xsql/schema.json`.
+
+### Fixed
+- **README samples break no more under `use Synthigy\Synthigy;`.** A partly
+  qualified `Synthigy\SessionLoginStore` resolved to
+  `Synthigy\Synthigy\SessionLoginStore`. The samples import each class, and
+  the README warns that `catch`/`instanceof` on such a name silently never
+  match.
+
 ## 0.2.2
 
 ### Added

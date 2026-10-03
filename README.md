@@ -40,13 +40,24 @@ XSQL, ['since' => 1990], actingAs: $userXid);
 
 Run it with `synthigy exec -- php app.php`.
 
+Import every SDK class you use (`use Synthigy\SynthigyError;`) or write it
+with a leading backslash (`\Synthigy\SynthigyError`). With
+`use Synthigy\Synthigy;` in scope, a partly qualified `Synthigy\SynthigyError`
+resolves to `Synthigy\Synthigy\SynthigyError`: `new` fails loudly, but
+`catch` and `instanceof` silently never match. PHPStan reports both.
+
 ## One process, one client
 
 `Synthigy::connect()` installs a process-wide default; every static verb
 (`Synthigy::query()`, `Synthigy::sync()`, ...) delegates to it. **Identity
 is multiplexed per-call via `actingAs:`, never a second connect().**
-Constructing `new Synthigy\Client(...)` directly is the escape hatch for
+Constructing `new \Synthigy\Client(...)` directly is the escape hatch for
 tests or a genuine multi-endpoint script.
+
+`Synthigy::whoami(actingAs: $xid)` answers who a call runs as: the user's
+xid, name, active flag, roles (group-conferred included), whether they are
+superuser, and whether this client may act as users at all. Use it when a user
+sees more or less than expected.
 
 ## Reads
 
@@ -99,7 +110,7 @@ $results = Synthigy::exec([
 
 ## Errors
 
-Everything throws `Synthigy\SynthigyError` (extends `RuntimeException`)
+Everything throws `\Synthigy\SynthigyError` (extends `RuntimeException`)
 with stable `->code`, derived `->category` (`auth | iam | validation |
 not_found | conflict | rate_limit | network | internal`) and `->retryable`.
 Structured fields when the server sends them: `->hint`, `->entity`,
@@ -169,7 +180,10 @@ Nothing to configure.
 Any shared cache works. APCu, shared by every PHP-FPM worker on the host:
 
 ```php
-final class ApcuTokenStore implements Synthigy\TokenStore
+use Synthigy\Synthigy;
+use Synthigy\TokenStore;
+
+final class ApcuTokenStore implements TokenStore
 {
     public function get(string $key): ?array
     {
@@ -203,9 +217,12 @@ process only (tests, RoadRunner, Swoole); under FPM every login would fail
 `LOGIN_STATE_UNKNOWN`.
 
 ```php
+use Synthigy\SessionLoginStore;
+use Synthigy\Synthigy;
+
 session_start();
 Synthigy::connect(clientId: 'my-app', clientSecret: getenv('APP_SECRET'),
-    loginStore: new Synthigy\SessionLoginStore());
+    loginStore: new SessionLoginStore());
 
 // /login
 header('Location: ' . Synthigy::loginStart(CALLBACK, returnTo: $_GET['returnTo'] ?? '/')['url']);
@@ -289,7 +306,8 @@ synthigy exec -- vendor/bin/synthigy-codegen gen xsql/ --out gen/ops.php
 ```
 
 This writes `gen/ops.php` (namespace `Generated`, change it with `--namespace`), and saves `xsql/schema.json` and `xsql/ops.ir.json`
-next to your queries.
+next to your queries. After a model change, add `--pull` to refresh both
+(or `synthigy schema pull`, which writes the same `xsql/schema.json`).
 
 **7. Use it:**
 

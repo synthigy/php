@@ -195,19 +195,6 @@ function resolveEndpoint(array $flags): string
 }
 
 /** @param list<string> $argv */
-function cmdPull(array $argv): int
-{
-    [$pos] = parseArgs($argv);
-    $endpoint = $pos[0] ?? (getenv('SYNTHIGY_ENDPOINT') ?: null);
-    if (!$endpoint) {
-        throw new CodegenError('usage: synthigy-codegen pull <endpoint> [out]');
-    }
-    $out = $pos[1] ?? 'schema.json';
-    pullSchema($endpoint, $out);
-    return 0;
-}
-
-/** @param list<string> $argv */
 function cmdGen(array $argv): int
 {
     [$pos, $flags] = parseArgs($argv);
@@ -327,10 +314,9 @@ function main(array $argv): int
     $rest = array_slice($argv, 1);
     try {
         return match ($cmd) {
-            'pull' => cmdPull($rest),
             'gen' => cmdGen($rest),
             'check' => cmdCheck($rest),
-            default => throw new CodegenError('usage: synthigy-codegen pull|gen|check ...'),
+            default => throw new CodegenError('usage: synthigy-codegen gen|check ...'),
         };
     } catch (CodegenError) {
         return 1;

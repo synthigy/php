@@ -102,6 +102,20 @@ final class ClientTest extends TestCase
         self::assertSame('user-xid-1', $t->lastRequestBody()['acting_as']);
     }
 
+    public function testWhoamiSendsTheOpAndActingAs(): void
+    {
+        $t = new FakeTransport();
+        $me = ['xid' => 'x-bgates', 'name' => 'bgates', 'active' => true, 'superuser' => false,
+               'roles' => ['Viewer'], 'groups' => [], 'client' => ['id' => 'viewer', 'trusted' => true]];
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => $me]]]);
+        $c = $this->client($t);
+
+        self::assertSame($me, $c->whoami('x-bgates'));
+        $body = $t->lastRequestBody();
+        self::assertSame([['op' => 'whoami']], $body['operations']);
+        self::assertSame('x-bgates', $body['acting_as']);
+    }
+
     public function testPerCallActingAsOverridesClientDefault(): void
     {
         $t = new FakeTransport();

@@ -219,6 +219,12 @@ final class Synthigy
     }
 
     /** @return array<string,mixed> */
+    public static function whoami(?string $actingAs = null): array
+    {
+        return self::client()->whoami($actingAs);
+    }
+
+    /** @return array<string,mixed> */
     public static function deployedModel(): array
     {
         return self::client()->deployedModel();
