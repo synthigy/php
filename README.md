@@ -80,7 +80,8 @@ $rows = Synthigy::sqlTemplate(
 
 - `?name:type=default` are named params, passed as an array.
 - `->genres` is a **left** pull — a movie with no genres is still returned;
-  `-genres` is **inner** and keeps only movies that have one.
+  `-genres` is **inner** and keeps only movies that have one; `!genres` keeps
+  only movies with none (filters allowed, no fields under it).
 - **Empty relations are omitted**, never `[]` — use `$movie['genres'] ?? []`.
 - Counting and aggregation compute in the database: `_count` / `_agg` in XSQL,
   or `sqlTemplate`.
@@ -108,6 +109,64 @@ $results = Synthigy::exec([
 ], actingAs: $userXid);
 ```
 
+## Files
+
+`$client->files()` (or `Synthigy::files()`) speaks the engine's `/files`
+endpoints: the bytes, their versions and folders, under the same access
+control as your data. Each file is also a `File` record on `/data`. A file is
+a path (`'/site/img/logo.png'`), an xid or the file; a folder is a path ending
+in `/` (`'/'` is ROOT), an xid or the folder.
+
+```php
+$files = Synthigy::files();
+$files->folder('/site/img/');                           // made with every missing folder above it
+$fi = $files->put('/site/img/logo.png', fopen('logo.png', 'rb'), 'image/png'); // creates, or replaces
+// $fi['xid'], $fi['size'], $fi['hash'] (SHA-256, the download ETag), $fi['uploaded_by']['name']
+
+$bytes = $files->download('/site/img/logo.png');        // [0, 1023] as $range for part of it
+$files->put($fi, $newBytes, ifMatch: $fi);              // FILE_CHANGED if someone was first
+$files->put(['name' => 'scan.pdf'], $bytes);            // a new file in no folder, every time
+$files->list('/site/');                                 // ['files' => ..., 'folders' => ...]; null: no folder
+$files->search('site logo');                            // paths holding the words in order, shortest first
+$files->move('/site/img/logo.png', '/brand/');          // keeps the name; never overwrites
+$files->move('/site/img/', '/assets/img/');             // a folder
+$vs = $files->versions($fi);                            // the last ten, newest first
+$files->restore($fi, $vs[1]);
+$files->share('/site/', 'read', [$userXid]);
+$files->delete('/site/img/logo.png');                   // or an empty folder: '/site/img/'
+```
+
+`put` never creates folders (a missing one is `FOLDER_NOT_FOUND`); `folder`
+does. `put` takes a string of bytes or a readable stream.
+`download(ifNoneMatch: $hash)` answers `null` while the file is unchanged;
+`info` answers `null` for a file you cannot see.
+
+A browser cannot send your token (`<img src>`, a link in an email). Files in a
+public folder load from a plain link, built without a request; `serve`
+answers a browser's request from your server with your token, Range and 304
+included:
+
+```php
+$files->folder('/site/', ['public' => true, 'cache' => 86400]);
+$src = $files->url('/site/img/logo.png');               // or an xid; url($ref, true) opens it in the browser
+$out = $files->serve('/private/logo.png', getallheaders()); // HttpResponse: status, headers, body
+http_response_code($out->status);
+foreach ($out->headers as $k => $v) header("$k: $v");
+echo $out->body;
+```
+
+A folder's own `public` and `cache` win, else the nearest folder above that
+has one (`null` clears its own); the folder shows what applies as `public`
+and `cache`, what is set on it under `settings`. File User may set the cache
+but not public (`ATTRIBUTE_FORBIDDEN`).
+
+One put carries up to the server's `SYNTHIGY_SERVER_MAX_BODY` (25 MB by
+default). The engine's [files guide](https://github.com/synthigy/synthigy/blob/main/docs/FILES.md)
+covers storage, access and retention; error codes include `FILE_NOT_FOUND`,
+`FOLDER_NOT_FOUND`, `FILE_CHANGED`, `FILE_TOO_LARGE`, `VERSION_EXPIRED`,
+`INVALID_PATH`, `AUDIT_UNAVAILABLE` and `FILES_UNAVAILABLE` (no files module
+on the server).
+
 ## Errors
 
 Everything throws `\Synthigy\SynthigyError` (extends `RuntimeException`)
@@ -118,7 +177,7 @@ Structured fields when the server sends them: `->hint`, `->entity`,
 `errorLine` rather than `line` because `\Exception` itself already
 declares a non-nullable `$line`, the throw site, and PHP won't let a child
 class redeclare it with an incompatible type), `->diagnostics`,
-`->requestId` (matches the `X-Request-Id` the SDK sends — correlate with
+`->requestId` (the `X-Request-Id` the server answered with — correlate with
 server logs). Discriminate on `->code`, never the message.
 
 `->retryable` is true for `network`, `rate_limit` and `internal` codes, and
@@ -146,17 +205,13 @@ is category `internal` but not retryable.
 - `actingAs` is server-verified impersonation for **trusted confidential**
   clients (the BFF model) — the SDK never handles end-user OAuth
   redirects.
-- `audience`: some servers require an explicit `client_credentials`
-  audience for `/data` access — the platform's audience model is opt-in by
-  design (a token minted with no audience resolves to an identity-only
-  one, regardless of the client's roles or API links; there is no
-  server-side default to configure around this). Pass `audience:
-  'https://synthigy.com'` (or whatever your server's `/data` audience is)
-  once at `connect()`/`Client` construction and every call this Client
-  makes uses it automatically — no need to thread it through every
-  `search()`/`sync()`/etc. call. `Client::token($audience)` still accepts
-  a per-call override for minting tokens for a *different* audience (e.g.
-  a third-party service Synthigy federates for).
+- `audience` (or `$SYNTHIGY_AUDIENCE`): leave it unset. Every mint names
+  `Client::PLATFORM_AUDIENCE` (`https://synthigy.com`), the audience `/data`
+  and the other platform endpoints require; a token naming no audience would
+  get an identity-only one that `/data` rejects. A client not linked to the
+  platform API fails the mint with `INVALID_AUDIENCE`. `Client::token($audience)`
+  mints for a *different* API, per call (e.g. a service that trusts Synthigy as
+  its IdP).
 
 ### Reusing tokens across requests
 
@@ -264,7 +319,7 @@ synthigy up
 ```
 
 The first `up` prints a `/setup` link; open it and pick a database. (No
-browser? `synthigy up --db sqlite` skips the wizard.) Already have a server?
+browser? `synthigy up --bundle sqlite` skips the wizard.) Already have a server?
 Skip this step.
 
 **2. Deploy your data model** in the modeler (or from code with `Synthigy::deploy()`, as a
@@ -396,7 +451,15 @@ It covers token minting, schema, search/get, sqlTemplate, XSQL, batched
 trip that creates and removes its own record (client-minted xid, cleaned
 up in a `finally`).
 
+`tests/FilesLiveTest.php` (same `live` group) exercises `/files` end to end:
+uploads, ranges, versions, folders, sharing and the refusals between a File
+Admin, a File User and a File Reader. It skips unless
+`SYNTHIGY_FILES_TEST_ENDPOINT` is set, plus
+`SYNTHIGY_FILES_TEST_{ADMIN,USER,READER}_{ID,SECRET}` (client-credentials
+clients whose service users hold those roles). Every name carries a run id
+and the test removes what it created.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The SDKs are permissive client libraries; the
-Synthigy engine is fair-code under the Sustainable Use License.
+Synthigy engine is source-available under the Business Source License 1.1.

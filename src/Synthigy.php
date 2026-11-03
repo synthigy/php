@@ -224,6 +224,12 @@ final class Synthigy
         return self::client()->whoami($actingAs);
     }
 
+    /** Files: bytes, folders, sharing and versions under /files. */
+    public static function files(): Files
+    {
+        return self::client()->files();
+    }
+
     /** @return array<string,mixed> */
     public static function deployedModel(): array
     {

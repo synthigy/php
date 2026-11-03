@@ -57,6 +57,7 @@ final class Client
     private readonly ?string $clientId;
     private readonly ?string $clientSecret;
     private readonly ?LoginStore $loginStore;
+    private ?Files $files = null;
 
     public function __construct(
         ?string $endpoint = null,
@@ -230,6 +231,16 @@ final class Client
         }
         $headers['X-Request-Id'] ??= $this->requestId();
         return $this->transport->request($method, $url, $body, $headers, $this->defaultTimeoutSeconds);
+    }
+
+    /** Files: bytes, folders, sharing and versions under /files. */
+    public function files(): Files
+    {
+        return $this->files ??= new Files(
+            $this->endpoint,
+            fn (string $method, string $url, ?string $body, array $headers): Http\HttpResponse
+                => $this->authedRequest($method, $url, $body, $headers),
+        );
     }
 
     /**
