@@ -42,6 +42,8 @@ final class CodegenTest extends TestCase
                             ['key' => 'genres', 'kind' => 'relation', 'cardinality' => 'many', 'fields' => [
                                 ['key' => 'name', 'type' => 'string', 'nullable' => false],
                             ]],
+                            ['key' => 'votes', 'kind' => 'op', 'type' => 'int', 'nullable' => false],
+                            ['key' => 'rating', 'kind' => 'op', 'type' => 'float'],
                         ],
                     ],
                 ],
@@ -180,6 +182,7 @@ final class CodegenTest extends TestCase
         self::assertStringNotContainsString('function syncMovie(array $params', $code);
         // relation field is optional (wire omits empty relations)
         self::assertStringContainsString('genres?:', $code);
+        self::assertStringContainsString('votes: int, rating: float|null', $code);
     }
 
     public function testSqlTemplateOpsRouteThroughSqlTemplateNotQuery(): void

@@ -19,7 +19,7 @@ final class FilesTest extends TestCase
         return new Client(endpoint: self::BASE, token: 'tok', transport: $t);
     }
 
-    /** @return array{method: string, url: string, body: ?string, headers: array<string,string>} */
+    /** @return array{method: string, url: string, body: ?string, headers: array<string,string>, timeout: ?float} */
     private static function last(FakeTransport $t): array
     {
         return $t->requests[count($t->requests) - 1];
@@ -108,6 +108,104 @@ final class FilesTest extends TestCase
         self::assertSame('"h1"', self::last($t)['headers']['If-None-Match']);
         self::assertSame('old', $files->download('/a/r.txt', version: ['id' => 7]));
         self::assertSame(self::BASE . '/files/f9/versions/7', self::last($t)['url']);
+    }
+
+    public function testTimeoutSparesFileBytes(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(200, ['xid' => 'f1']);
+        $t->respond(new HttpResponse(200, [], 'bytes'));
+        $t->respondJson(200, ['xid' => 'f1']);
+        $t->respond(new HttpResponse(200, [], 'PK'));
+        $files = (new Client(endpoint: self::BASE, token: 'tok', timeoutSeconds: 5.0, transport: $t))->files();
+
+        $files->info('f1');
+        $files->download('f1');
+        $files->put('f1', 'v2');
+        $files->zip(['f1']);
+        self::assertSame([5.0, null, null, null], array_column($t->requests, 'timeout'));
+    }
+
+    public function testZip(): void
+    {
+        $t = new FakeTransport();
+        $t->respond(new HttpResponse(200, ['content-type' => 'application/zip'], 'PK'));
+        $t->respondJson(413, ['error' => ['code' => 'ZIP_TOO_LARGE', 'message' => 'too big']]);
+        $files = $this->client($t)->files();
+
+        self::assertSame('PK', $files->zip(['f1', '/a/r.txt', ['xid' => 'f9']], ['/site/img/', ['xid' => 'd1', 'path' => '/b/']]));
+        $req = self::last($t);
+        self::assertSame(['POST', self::BASE . '/files/zip', 'application/json'], [$req['method'], $req['url'], $req['headers']['Content-Type']]);
+        self::assertSame(['files' => ['f1', '/a/r.txt', 'f9'], 'folders' => ['/site/img/', '/b/']], json_decode((string)$req['body'], true));
+        self::assertSame('ZIP_TOO_LARGE', self::code(fn () => $files->zip(folders: ['/']))->code);
+    }
+
+    public function testLinkLinksUnlink(): void
+    {
+        $t = new FakeTransport();
+        $made = ['xid' => 'l1', 'file' => 'f9', 'url' => self::BASE . '/files/link/t', 'downloads' => 0, 'max_downloads' => 2, 'inline' => true];
+        $t->respondJson(200, ['xid' => 'f9']);
+        $t->respondJson(201, $made);
+        $t->respondJson(200, ['file' => 'f9', 'links' => [$made]]);
+        $t->respond(new HttpResponse(204, [], ''));
+        $t->respond(new HttpResponse(204, [], ''));
+        $files = $this->client($t)->files();
+
+        self::assertSame($made['url'], $files->link('/a.txt', expires: 600, maxDownloads: 2, inline: true)['url'] ?? null);
+        self::assertSame('l1', $files->links('f9')[0]['xid']);
+        $files->unlink($made);
+        $files->unlink('l1');
+        self::assertSame([
+            ['GET', self::BASE . '/files/info?path=%2Fa.txt'],
+            ['POST', self::BASE . '/files/f9/links'],
+            ['GET', self::BASE . '/files/f9/links'],
+            ['DELETE', self::BASE . '/files/links/l1'],
+            ['DELETE', self::BASE . '/files/links/l1'],
+        ], array_map(static fn ($r) => [$r['method'], $r['url']], $t->requests));
+        self::assertSame(['expires' => 600, 'max_downloads' => 2, 'inline' => true], json_decode((string)$t->requests[1]['body'], true));
+    }
+
+    public function testLinkRefusalsAndCanLink(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(403, ['error' => ['code' => 'LINKS_DISABLED', 'message' => 'off']]);
+        $t->respondJson(400, ['error' => ['code' => 'INVALID_EXPIRES', 'message' => 'bad']]);
+        $t->respondJson(404, ['error' => ['code' => 'LINK_NOT_FOUND', 'message' => 'gone']]);
+        $t->respondJson(200, ['xid' => 'd1', 'path' => '/s/']);
+        $files = $this->client($t)->files();
+
+        $e = self::code(fn () => $files->link('f9'));
+        self::assertSame(['LINKS_DISABLED', 'iam'], [$e->code, $e->category]);
+        self::assertSame('{}', $t->requests[0]['body']);
+        $e = self::code(fn () => $files->link('f9', expires: 0));
+        self::assertSame(['INVALID_EXPIRES', 'validation'], [$e->code, $e->category]);
+        $e = self::code(fn () => $files->unlink('l9'));
+        self::assertSame(['LINK_NOT_FOUND', 'not_found'], [$e->code, $e->category]);
+        $files->folder('/s/', ['can_link' => true, 'cache' => 60]);
+        self::assertSame(['can_link' => true, 'cache' => 60], json_decode((string)self::last($t)['body'], true));
+    }
+
+    public function testKeyFormatReachesFiles(): void
+    {
+        $t = new FakeTransport();
+        $t->respondJson(200, ['xid' => 'f9']);
+        $t->respondJson(200, ['xid' => 'f9']);
+        $t->respondJson(200, ['file' => 'f9', 'links' => []]);
+        $t->respondJson(200, ['xid' => 'f9']);
+        $camel = new Client(endpoint: self::BASE, token: 'tok', keyFormat: 'camel', transport: $t);
+        $snake = new Client(endpoint: self::BASE, token: 'tok', keyFormat: 'snake', transport: $t);
+
+        $camel->files()->info('f9');
+        $snake->files()->info('f9');
+        $camel->files()->links('f9');
+        $camel->files()->info('/a b.txt');
+        self::assertSame([
+            self::BASE . '/files/f9/info?key_format=camel',
+            self::BASE . '/files/f9/info',
+            self::BASE . '/files/f9/links?key_format=camel',
+            self::BASE . '/files/info?path=%2Fa+b.txt&key_format=camel',
+        ], array_column($t->requests, 'url'));
+        self::assertSame(self::BASE . '/files/f9', $camel->files()->url('f9'));
     }
 
     public function testListSearchMove(): void
@@ -211,5 +309,9 @@ final class FilesTest extends TestCase
         $out = $files->serve('/gone.txt');
         self::assertSame(404, $out->status);
         self::assertStringContainsString('FILE_NOT_FOUND', $out->body);
+
+        $t->respond(new HttpResponse(401, [], ''));
+        $t->respond(new HttpResponse(401, [], ''));
+        self::assertSame('UNAUTHORIZED', self::code(fn () => $files->serve('/note.txt'))->code);
     }
 }

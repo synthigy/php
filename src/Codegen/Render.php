@@ -122,10 +122,6 @@ function fieldShape(array $field): string
         $inner = (($field['cardinality'] ?? null) === 'many') ? "list<{$child}>" : $child;
         return "{$key}?: {$inner}";
     }
-    if ($kind === 'map') {
-        $v = scalarType((string)($field['value'] ?? ''));
-        return "{$key}?: array<string, {$v}>";
-    }
     return "{$key}: " . scalarFieldType($field);
 }
 
@@ -346,14 +342,15 @@ function emitWriteEntity(string $entity, array $schema, array $referenced): arra
     $rels = $ent['relations'] ?? [];
     $entries = ['xid?: string'];
     foreach ($ent['attributes'] ?? [] as $k => $a) {
-        if ($k === 'xid' || isset($rels[$k])) {
+        if ($k === 'xid' || isset($rels[$k]) || !empty($a['read-only'])) {
             continue;
         }
         $t = attrWriteType($a);
         $entries[] = (($a['nullable'] ?? null) === false) ? "{$k}: {$t}" : "{$k}?: {$t}|null";
     }
     foreach ($rels as $k => $r) {
-        if (!in_array($r['to'] ?? null, array_keys($schema['entities'] ?? []), true)) {
+        if (!in_array($r['to'] ?? null, array_keys($schema['entities'] ?? []), true)
+            || !empty($ent['attributes'][$k]['read-only'])) {
             continue;
         }
         $link = in_array($r['to'], $referenced, true)

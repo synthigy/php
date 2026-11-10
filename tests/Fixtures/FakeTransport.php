@@ -16,7 +16,7 @@ use Synthigy\Http\HttpTransport;
  */
 final class FakeTransport implements HttpTransport
 {
-    /** @var list<array{method: string, url: string, body: ?string, headers: array<string,string>}> */
+    /** @var list<array{method: string, url: string, body: ?string, headers: array<string,string>, timeout: ?float}> */
     public array $requests = [];
 
     /** @var list<HttpResponse|callable(string,string,?string,array<string,string>):HttpResponse> */
@@ -45,7 +45,7 @@ final class FakeTransport implements HttpTransport
 
     public function request(string $method, string $url, ?string $body, array $headers, ?float $timeoutSeconds): HttpResponse
     {
-        $this->requests[] = ['method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers];
+        $this->requests[] = ['method' => $method, 'url' => $url, 'body' => $body, 'headers' => $headers, 'timeout' => $timeoutSeconds];
 
         if ($this->queue === []) {
             throw new \RuntimeException('FakeTransport: no queued response for ' . $method . ' ' . $url);

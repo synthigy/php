@@ -13,17 +13,19 @@ use Synthigy\Http\HttpResponse;
  * the folder itself.
  *
  * @phpstan-type FileInfo array{xid: string, name: ?string, size: ?int, hash: ?string, status: ?string, content_type: ?string, uploaded_at: ?string, uploaded_by: ?array{xid: string, name: ?string}, folder: ?array{xid: string, name?: string, path?: string}, public: bool}
- * @phpstan-type FolderInfo array{xid: string, name: string, path: string, parent: ?string, writable: bool, public: bool, cache: ?int, settings: array{public: ?bool, cache: ?int}}
+ * @phpstan-type FolderInfo array{xid: string, name: string, path: string, parent: ?string, writable: bool, public: bool, cache: ?int, can_link: bool, settings: array{public: ?bool, cache: ?int, can_link: ?bool}}
+ * @phpstan-type FileLink array{xid: string, file: string, created_by: ?string, expires_at: string, max_downloads: ?int, downloads: int, inline: bool, url?: string}
  */
 final class Files
 {
     private const SERVED = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag',
         'content-disposition', 'cache-control', 'x-content-type-options', 'content-security-policy'];
 
-    /** @param \Closure(string, string, ?string, array<string,string>): HttpResponse $request */
+    /** @param \Closure(string, string, ?string, array<string,string>, bool): HttpResponse $request */
     public function __construct(
         private readonly string $endpoint,
         private readonly \Closure $request,
+        private readonly ?string $keyFormat = null,
     ) {
     }
 
@@ -59,6 +61,9 @@ final class Files
     /** @param array<string,string|int|null> $query */
     private function at(string $path, array $query = []): string
     {
+        if ($this->keyFormat !== null && $this->keyFormat !== 'snake') {
+            $query['key_format'] = $this->keyFormat;
+        }
         $query = array_filter($query, static fn ($v) => $v !== null && $v !== '');
         return $this->endpoint . '/files' . $path . ($query === [] ? '' : '?' . http_build_query($query));
     }
@@ -105,9 +110,9 @@ final class Files
      * @param array<string,string> $headers
      * @internal
      */
-    public function send(string $method, string $url, ?string $body = null, array $headers = []): HttpResponse
+    public function send(string $method, string $url, ?string $body = null, array $headers = [], bool $fileBytes = false): HttpResponse
     {
-        $resp = ($this->request)($method, $url, $body, $headers);
+        $resp = ($this->request)($method, $url, $body, $headers, $fileBytes);
         if (($resp->status >= 200 && $resp->status < 300) || $resp->status === 304) {
             return $resp;
         }
@@ -194,7 +199,7 @@ final class Files
             $headers['If-Match'] = '"' . $expected . '"';
         }
         /** @var FileInfo */
-        return json_decode($this->send($method, $this->at($path, $query), $data, $headers)->body, true);
+        return json_decode($this->send($method, $this->at($path, $query), $data, $headers, true)->body, true);
     }
 
     /**
@@ -217,8 +222,22 @@ final class Files
         [$path, $query] = $version === null
             ? self::fileAt($file)
             : [self::seg($this->xidAt($file)) . '/versions' . self::seg(is_array($version) ? $version['id'] : $version), []];
-        $resp = $this->send('GET', $this->at($path, $query), null, $headers);
+        $resp = $this->send('GET', $this->at($path, $query), null, $headers, true);
         return $resp->status === 304 ? null : $resp->body;
+    }
+
+    /**
+     * One zip (its bytes) of $files and of everything inside $folders, read as
+     * you; what you cannot read is listed in its _skipped.txt.
+     *
+     * @param list<string|array{xid?: string, path?: string}> $files
+     * @param list<string|array{xid?: string, path?: string}> $folders
+     */
+    public function zip(array $files = [], array $folders = []): string
+    {
+        $fileRef = static fn (string|array $f): string => is_array($f) ? (string)($f['xid'] ?? $f['path'] ?? '') : $f;
+        $body = json_encode(['files' => array_map($fileRef, $files), 'folders' => array_map(self::folderRef(...), $folders)], JSON_THROW_ON_ERROR);
+        return $this->send('POST', $this->at('/zip'), $body, ['Content-Type' => 'application/json'], true)->body;
     }
 
     /**
@@ -351,15 +370,15 @@ final class Files
 
     /**
      * The folder at $path, made with every missing folder above it.
-     * $settings sets its own 'public' and 'cache' (null: inherit from above).
+     * $settings sets its own 'public', 'cache' and 'can_link' (null: inherit from above).
      *
-     * @param array{public?: ?bool, cache?: ?int} $settings
+     * @param array{public?: ?bool, cache?: ?int, can_link?: ?bool} $settings
      * @return FolderInfo
      */
     public function folder(string $path, array $settings = []): array
     {
         /** @var FolderInfo */
-        return $this->json('PUT', '/folders', array_intersect_key($settings, ['public' => 1, 'cache' => 1]), ['path' => $path]);
+        return $this->json('PUT', '/folders', array_intersect_key($settings, ['public' => 1, 'cache' => 1, 'can_link' => 1]), ['path' => $path]);
     }
 
     /**
@@ -442,9 +461,47 @@ final class Files
     }
 
     /**
+     * A link that downloads the file without signing in, in folders where
+     * links are on: $expires seconds (default 3600, at most 7 days),
+     * $maxDownloads, $inline. Its 'url' is shown only now.
+     *
+     * @param string|array{xid: string} $file
+     * @return FileLink
+     */
+    public function link(string|array $file, ?int $expires = null, ?int $maxDownloads = null, ?bool $inline = null): array
+    {
+        $opts = array_filter(['expires' => $expires, 'max_downloads' => $maxDownloads, 'inline' => $inline], static fn ($v) => $v !== null);
+        /** @var FileLink */
+        return $this->json('POST', self::seg($this->xidAt($file)) . '/links', $opts);
+    }
+
+    /**
+     * The file's live links you can see: your own, or all of them for File Admin.
+     *
+     * @param string|array{xid: string} $file
+     * @return list<FileLink>
+     */
+    public function links(string|array $file): array
+    {
+        /** @var list<FileLink> */
+        return $this->json('GET', self::seg($this->xidAt($file)) . '/links')['links'] ?? [];
+    }
+
+    /**
+     * End a link (the link or its xid) at once, on every engine.
+     *
+     * @param string|array{xid: string} $link
+     */
+    public function unlink(string|array $link): void
+    {
+        $this->send('DELETE', $this->at('/links' . self::seg(self::xid($link))));
+    }
+
+    /**
      * Answer a browser's request with a file. Range, If-None-Match and
      * If-Range from $headers go through, and the answer keeps status, type,
-     * length, ETag and name; a refusal is the engine's own answer.
+     * length, ETag and name; a refusal is the engine's own answer. Our own
+     * credentials failing (UNAUTHORIZED) or the network throws.
      *
      * @param string|array{xid: string} $file
      * @param array<string,string> $headers the browser's request headers
@@ -463,15 +520,7 @@ final class Files
             $query['disposition'] = 'inline';
         }
         $head = strtoupper($method) === 'HEAD';
-        try {
-            $resp = ($this->request)($head ? 'HEAD' : 'GET', $this->at($path, $query), null, $pass);
-        } catch (SynthigyError $e) {
-            if ($e->status === null) {
-                throw $e;
-            }
-            return new HttpResponse($e->status, ['content-type' => 'application/json'],
-                (string)json_encode(['error' => ['code' => $e->code, 'message' => $e->getMessage()]]));
-        }
+        $resp = ($this->request)($head ? 'HEAD' : 'GET', $this->at($path, $query), null, $pass, true);
         return new HttpResponse($resp->status, array_intersect_key($resp->headers, array_flip(self::SERVED)), $head ? '' : $resp->body);
     }
 }

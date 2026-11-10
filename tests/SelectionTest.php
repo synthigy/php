@@ -76,14 +76,15 @@ final class SelectionTest extends TestCase
         ], $result);
     }
 
-    public function testCountKeyIsNormalizedLikeAnyOtherKey(): void
+    public function testOperationEntriesPassThrough(): void
     {
-        // The ported normalizer (matching sdk/py/synthigy/selection.py, the
-        // reference) has no special-casing for "_count"/"_agg" — every
-        // dict-valued key gets the same relation-array wrap.
+        $ops = [
+            ['alias' => 'votes', 'op' => 'count'],
+            ['alias' => 'rating', 'op' => ['avg' => 'value']],
+        ];
         self::assertSame(
-            ['_count' => [['selections' => ['actors' => null]]]],
-            normalizeSelection(['_count' => ['actors' => null]]),
+            ['title' => null, 'ratings' => $ops],
+            normalizeSelection(['title' => null, 'ratings' => $ops]),
         );
     }
 

@@ -209,12 +209,13 @@ final class Client
      *
      * @param array<string,string> $headers
      */
-    private function authedRequest(string $method, string $url, ?string $body, array $headers): Http\HttpResponse
+    private function authedRequest(string $method, string $url, ?string $body, array $headers, bool $fileBytes = false): Http\HttpResponse
     {
-        $resp = $this->attempt($method, $url, $body, $headers);
+        $timeoutSeconds = $fileBytes ? null : $this->defaultTimeoutSeconds;
+        $resp = $this->attempt($method, $url, $body, $headers, $timeoutSeconds);
         if ($resp->status === 401 && $this->tokenSource !== null) {
             $this->tokenSource->clear();
-            $resp = $this->attempt($method, $url, $body, $headers);
+            $resp = $this->attempt($method, $url, $body, $headers, $timeoutSeconds);
         }
         if ($resp->status === 401) {
             throw new SynthigyError('Unauthorized', 'UNAUTHORIZED', status: 401, requestId: $resp->header('x-request-id'));
@@ -223,14 +224,14 @@ final class Client
     }
 
     /** @param array<string,string> $headers */
-    private function attempt(string $method, string $url, ?string $body, array $headers): Http\HttpResponse
+    private function attempt(string $method, string $url, ?string $body, array $headers, ?float $timeoutSeconds): Http\HttpResponse
     {
         $tok = $this->token();
         if ($tok !== '') {
             $headers['Authorization'] = 'Bearer ' . $tok;
         }
         $headers['X-Request-Id'] ??= $this->requestId();
-        return $this->transport->request($method, $url, $body, $headers, $this->defaultTimeoutSeconds);
+        return $this->transport->request($method, $url, $body, $headers, $timeoutSeconds);
     }
 
     /** Files: bytes, folders, sharing and versions under /files. */
@@ -238,8 +239,9 @@ final class Client
     {
         return $this->files ??= new Files(
             $this->endpoint,
-            fn (string $method, string $url, ?string $body, array $headers): Http\HttpResponse
-                => $this->authedRequest($method, $url, $body, $headers),
+            fn (string $method, string $url, ?string $body, array $headers, bool $fileBytes = false): Http\HttpResponse
+                => $this->authedRequest($method, $url, $body, $headers, $fileBytes),
+            $this->defaultKeyFormat,
         );
     }
 

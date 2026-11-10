@@ -3,6 +3,36 @@
 All notable changes to `synthigy/sdk` (Packagist). Follows
 [semver](https://semver.org). Pre-1.0: breaking changes can land on minor bumps.
 
+## 0.2.5
+
+Needs an engine with `POST /files/zip` (after v0.4.1).
+
+### Breaking
+- **`_count` / `_agg` are gone** (engine after v0.4.1 refuses them).
+  Write an operation per value: XSQL `votes: count(ratings)`,
+  `rating: avg(ratings.value)`; on the wire an `{alias, op, args?}` entry
+  on the relation key. The alias is the result key and can be sorted by.
+- the PHP generator types an operation as a plain field (counts `int`, never null;
+  `avg` float; `sum`/`min`/`max` the field's type). The `_count` / `_agg`
+  map fields are gone; regenerate.
+
+### Added
+- **`files()->zip($files, $folders)`**: one zip (bytes) of the files and of
+  everything inside the folders, read as you. `ZIP_TOO_LARGE` joins the error
+  codes.
+- **`files()->link($file, expires:, maxDownloads:, inline:)`**, `links($file)`,
+  `unlink($link | $xid)`: download links for people without an account, where
+  the folder's `can_link` allows them; `files()->folder($path, ['can_link' => ...])`.
+  `LINKS_DISABLED`, `LINK_NOT_FOUND` and `INVALID_EXPIRES` join the error codes.
+- `files()` answers follow the client's `keyFormat`, as `/data` results do
+  (needs an engine that reads `key_format` on `/files`).
+
+### Fixed
+- A configured `timeoutSeconds` no longer cuts file bytes short: `files()->put`,
+  `download`, `zip` and `serve` run as long as the transfer takes.
+- `FILES_MIGRATING` (uploads paused while the server moves files to a new store) is now category `internal` and retryable; it was unknown, so never retryable.
+- `files()->serve` throws `UNAUTHORIZED` when the client's own credentials fail, as the other SDKs do; it used to answer the browser with a 401 of its own, hiding the misconfiguration.
+
 ## 0.2.4
 
 Needs engine v0.4.1 or newer for files.

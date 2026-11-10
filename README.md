@@ -83,8 +83,9 @@ $rows = Synthigy::sqlTemplate(
   `-genres` is **inner** and keeps only movies that have one; `!genres` keeps
   only movies with none (filters allowed, no fields under it).
 - **Empty relations are omitted**, never `[]` — use `$movie['genres'] ?? []`.
-- Counting and aggregation compute in the database: `_count` / `_agg` in XSQL,
-  or `sqlTemplate`.
+- Counting and aggregation compute in the database: an operation line in XSQL
+  (`votes: count(movie_ratings)`, `rating: avg(movie_ratings.value)`; the alias
+  is the result key), or `sqlTemplate`.
 
 ## Writes
 
@@ -132,6 +133,7 @@ $files->move('/site/img/logo.png', '/brand/');          // keeps the name; never
 $files->move('/site/img/', '/assets/img/');             // a folder
 $vs = $files->versions($fi);                            // the last ten, newest first
 $files->restore($fi, $vs[1]);
+$zip = $files->zip(['/notes/today.txt'], ['/site/img/']);  // zip bytes; unreadable ones in _skipped.txt
 $files->share('/site/', 'read', [$userXid]);
 $files->delete('/site/img/logo.png');                   // or an empty folder: '/site/img/'
 ```
@@ -155,16 +157,38 @@ foreach ($out->headers as $k => $v) header("$k: $v");
 echo $out->body;
 ```
 
-A folder's own `public` and `cache` win, else the nearest folder above that
-has one (`null` clears its own); the folder shows what applies as `public`
-and `cache`, what is set on it under `settings`. File User may set the cache
-but not public (`ATTRIBUTE_FORBIDDEN`).
+A folder's own `public`, `cache` and `can_link` win, else the nearest folder
+above that has one (`null` clears its own); the folder shows what applies as
+`public`, `cache` and `can_link`, what is set on it under `settings`. File
+User may set the cache but not public or can_link (`ATTRIBUTE_FORBIDDEN`).
 
-One put carries up to the server's `SYNTHIGY_SERVER_MAX_BODY` (25 MB by
-default). The engine's [files guide](https://github.com/synthigy/synthigy/blob/main/docs/FILES.md)
+A link hands one file to someone without an account, or to another service:
+
+```php
+$files->folder('/reports/', ['can_link' => true]);     // File Admin's to set; off everywhere until set
+$link = $files->link('/reports/q3.pdf', expires: 86400, maxDownloads: 3);
+$link['url'];                                           // https://.../files/link/<token>, shown only now
+$files->links('/reports/q3.pdf');                       // live links you can see (File Admin: all)
+$files->unlink($link);                                  // or its xid; ends at once, on every engine
+```
+
+Files in no folder never get links; File Reader cannot make them. Every
+download checks that whoever made the link can still read the file.
+`expires` is seconds, 3600 by default, at most 7 days; with `maxDownloads`
+each GET is one whole download (ranges are ignored). An expired, used-up,
+revoked or wrong link is `LINK_NOT_FOUND`; the `url` cannot be read back.
+
+`/files` answers follow the client's `keyFormat` (`contentType`,
+`maxDownloads` under `camel`), as `/data` results do.
+
+One put has no size limit on the Enso and Jetty servers; on http-kit it
+carries up to `SYNTHIGY_HTTPKIT_MAX_BODY` (25 MB by default), refused with a 413.
+The engine's [files guide](https://github.com/synthigy/synthigy/blob/main/docs/FILES.md)
 covers storage, access and retention; error codes include `FILE_NOT_FOUND`,
-`FOLDER_NOT_FOUND`, `FILE_CHANGED`, `FILE_TOO_LARGE`, `VERSION_EXPIRED`,
-`INVALID_PATH`, `AUDIT_UNAVAILABLE` and `FILES_UNAVAILABLE` (no files module
+`FOLDER_NOT_FOUND`, `FILE_CHANGED`, `FILE_TOO_LARGE`, `ZIP_TOO_LARGE`, `VERSION_EXPIRED`,
+`INVALID_PATH`, `LINKS_DISABLED` (iam: the folder does not allow links),
+`LINK_NOT_FOUND`, `INVALID_EXPIRES` (not whole seconds from 1 to 604800),
+`AUDIT_UNAVAILABLE` and `FILES_UNAVAILABLE` (no files module
 on the server).
 
 ## Errors

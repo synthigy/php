@@ -241,7 +241,7 @@ final class FilesLiveTest extends TestCase
         self::expectErr('ATTRIBUTE_FORBIDDEN', 'iam', fn () => $user->folder($top, ['public' => true]));
         $user->folder($top, ['cache' => 120]);
         $shown = $admin->folder($top, ['public' => true]);
-        self::assertSame([true, 120, ['public' => true, 'cache' => 120]], [$shown['public'], $shown['cache'], $shown['settings']]);
+        self::assertSame([true, 120, ['public' => true, 'cache' => 120, 'can_link' => null]], [$shown['public'], $shown['cache'], $shown['settings']]);
         self::assertTrue($user->info($note)['public'] ?? null);
         foreach ([$user->url($note), $user->url($notePath)] as $url) {
             [$status, $body, $headers] = self::fetch($url);
@@ -263,6 +263,50 @@ final class FilesLiveTest extends TestCase
         $out = $user->serve($notePath, ['Range' => 'bytes=0-1']);
         self::assertSame([206, 'he'], [$out->status, $out->body]);
         self::assertSame(404, $user->serve("{$top}gone-{$run}.txt")->status);
+
+        // 5b. download links
+        $shut = $this->put($this->user, "{$top}link-{$run}.txt", 'linked');
+        $admin->folder($top, ['public' => false]);
+        self::expectErr('LINKS_DISABLED', 'iam', fn () => $user->link($shut));
+        self::expectErr('ATTRIBUTE_FORBIDDEN', 'iam', fn () => $user->folder($top, ['can_link' => true]));
+        self::assertTrue($admin->folder($top, ['can_link' => true])['can_link']);
+        self::expectErr('FORBIDDEN', 'iam', fn () => $reader->link($shut));
+        self::expectErr('INVALID_EXPIRES', 'validation', fn () => $user->link($shut, expires: 0));
+
+        $link = $user->link($shut, expires: 600);
+        self::assertSame([$shut['xid'], $userXid, 0], [$link['file'], $link['created_by'], $link['downloads']]);
+        [$status, $body, $headers] = self::fetch($link['url'] ?? '');
+        self::assertSame([200, 'linked', 'no-referrer'], [$status, $body, $headers['referrer-policy'] ?? null]);
+
+        $once = $user->link($shut, maxDownloads: 1, inline: true);
+        $first = file_get_contents($once['url'] ?? '', false, stream_context_create(['http' => ['ignore_errors' => true, 'header' => 'Range: bytes=1-2']]));
+        self::assertSame([1, 'linked'], [preg_match('/ 200 /', $http_response_header[0] ?? ''), $first], 'a limited link ignores Range');
+        self::assertNotEmpty(preg_grep('/^content-disposition:\s*inline/i', $http_response_header));
+        self::assertSame(404, self::fetch($once['url'] ?? '')[0], 'used up');
+
+        $camel = new Client(endpoint: (string)getenv('SYNTHIGY_FILES_TEST_ENDPOINT'), clientId: (string)getenv('SYNTHIGY_FILES_TEST_USER_ID'),
+            clientSecret: (string)getenv('SYNTHIGY_FILES_TEST_USER_SECRET'), keyFormat: 'camel', tokenStore: false);
+        $seen = array_values(array_filter($camel->files()->links($shut), static fn ($l) => $l['xid'] === $link['xid']))[0];
+        self::assertSame([$userXid, null, false], [$seen['createdBy'] ?? 'missing', $seen['maxDownloads'] ?? null, array_key_exists('created_by', $seen)], 'keyFormat camel');
+        self::assertSame($user->info($shut)['content_type'] ?? 'x', $camel->files()->info($shut)['contentType'] ?? 'y');
+        $mine = array_column($user->links($shut), null, 'xid');
+        self::assertArrayHasKey($link['xid'], $mine);
+        self::assertSame([], array_filter($mine, static fn ($l) => array_key_exists('url', $l)), 'the url is shown once');
+        self::assertSame(1, $mine[$link['xid']]['downloads']);
+        $admins = $admin->link($shut);
+        self::assertArrayNotHasKey($admins['xid'], array_column($user->links($shut), null, 'xid'), 'File User sees its own');
+        self::assertArrayHasKey($link['xid'], array_column($admin->links($shut), null, 'xid'), 'File Admin sees all');
+        self::expectErr('LINK_NOT_FOUND', 'not_found', fn () => $user->unlink($admins['xid']));
+
+        $admin->folder($top, ['can_link' => false]);
+        self::assertSame(404, self::fetch($link['url'] ?? '')[0], 'switched off: existing links stop');
+        $admin->folder($top, ['can_link' => true]);
+        self::assertSame(200, self::fetch($link['url'] ?? '')[0]);
+        $user->unlink($link);
+        self::assertSame(404, self::fetch($link['url'] ?? '')[0], 'unlinked: gone at once');
+        $user->delete($shut);
+        self::assertSame(404, self::fetch($admins['url'] ?? '')[0], 'file deleted: its links die');
+        $admin->folder($top, ['public' => true, 'can_link' => null]);
 
         // 6. admin moves the subfolder to ROOT and deletes it
         self::assertSame("/sub2-{$run}/", $admin->move("{$top}sub2/", "/sub2-{$run}/")['path'] ?? null);
