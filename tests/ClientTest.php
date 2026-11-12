@@ -21,7 +21,6 @@ final class ClientTest extends TestCase
         return new Client(
             endpoint: 'https://synthigy.example.test',
             token: $extra['token'] ?? 'static-token',
-            actingAs: $extra['actingAs'] ?? null,
             keyFormat: $extra['keyFormat'] ?? null,
             transport: $transport,
         );
@@ -116,15 +115,18 @@ final class ClientTest extends TestCase
         self::assertSame('x-bgates', $body['acting_as']);
     }
 
-    public function testPerCallActingAsOverridesClientDefault(): void
+    public function testActingAsIsPerCall(): void
     {
         $t = new FakeTransport();
         $t->respondJson(200, ['results' => [['ok' => true, 'data' => []]]]);
-        $c = $this->client($t, ['actingAs' => 'default-user']);
+        $t->respondJson(200, ['results' => [['ok' => true, 'data' => []]]]);
+        $c = $this->client($t);
 
-        $c->search('Movie', null, null, 'override-user');
+        $c->search('Movie', null, null);
+        self::assertArrayNotHasKey('acting_as', $t->lastRequestBody(), 'the client runs as itself');
 
-        self::assertSame('override-user', $t->lastRequestBody()['acting_as']);
+        $c->search('Movie', null, null, 'call-user');
+        self::assertSame('call-user', $t->lastRequestBody()['acting_as']);
     }
 
     public function testGetFlatArgsAndNull(): void

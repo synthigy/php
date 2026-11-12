@@ -92,12 +92,12 @@ final class Files
     }
 
     /** @param string|array{xid?: string} $file */
-    private function xidAt(string|array $file): string
+    private function xidAt(string|array $file, ?string $actingAs = null): string
     {
         if (!self::isPath($file)) {
             return self::xid($file);
         }
-        $f = $this->info($file);
+        $f = $this->info($file, $actingAs);
         if ($f === null) {
             throw new SynthigyError('No such file: ' . $file, 'FILE_NOT_FOUND', status: 404);
         }
@@ -110,8 +110,11 @@ final class Files
      * @param array<string,string> $headers
      * @internal
      */
-    public function send(string $method, string $url, ?string $body = null, array $headers = [], bool $fileBytes = false): HttpResponse
+    public function send(string $method, string $url, ?string $body = null, array $headers = [], bool $fileBytes = false, ?string $actingAs = null): HttpResponse
     {
+        if ($actingAs !== null && $actingAs !== '') {
+            $headers['X-Acting-As'] = $actingAs;
+        }
         $resp = ($this->request)($method, $url, $body, $headers, $fileBytes);
         if (($resp->status >= 200 && $resp->status < 300) || $resp->status === 304) {
             return $resp;
@@ -139,7 +142,7 @@ final class Files
      * @return array<string,mixed>
      * @internal
      */
-    public function json(string $method, string $path, ?array $payload = null, array $query = []): array
+    public function json(string $method, string $path, ?array $payload = null, array $query = [], ?string $actingAs = null): array
     {
         $body = null;
         $headers = [];
@@ -150,7 +153,7 @@ final class Files
             }
             $headers['Content-Type'] = 'application/json';
         }
-        $decoded = json_decode($this->send($method, $this->at($path, $query), $body, $headers)->body, true);
+        $decoded = json_decode($this->send($method, $this->at($path, $query), $body, $headers, false, $actingAs)->body, true);
         return is_array($decoded) ? $decoded : [];
     }
 
@@ -165,7 +168,7 @@ final class Files
      * @param string|array{hash: ?string}|null $ifMatch
      * @return FileInfo
      */
-    public function put(string|array $target, mixed $data, ?string $contentType = null, string|array|null $ifMatch = null): array
+    public function put(string|array $target, mixed $data, ?string $contentType = null, string|array|null $ifMatch = null, ?string $actingAs = null): array
     {
         if (is_resource($data)) {
             $data = stream_get_contents($data);
@@ -199,7 +202,7 @@ final class Files
             $headers['If-Match'] = '"' . $expected . '"';
         }
         /** @var FileInfo */
-        return json_decode($this->send($method, $this->at($path, $query), $data, $headers, true)->body, true);
+        return json_decode($this->send($method, $this->at($path, $query), $data, $headers, true, $actingAs)->body, true);
     }
 
     /**
@@ -210,7 +213,7 @@ final class Files
      * @param array{0: ?int, 1?: ?int}|null $range
      * @param int|array{id: int}|null $version
      */
-    public function download(string|array $file, ?array $range = null, ?string $ifNoneMatch = null, int|array|null $version = null): ?string
+    public function download(string|array $file, ?array $range = null, ?string $ifNoneMatch = null, int|array|null $version = null, ?string $actingAs = null): ?string
     {
         $headers = [];
         if ($range !== null) {
@@ -221,8 +224,8 @@ final class Files
         }
         [$path, $query] = $version === null
             ? self::fileAt($file)
-            : [self::seg($this->xidAt($file)) . '/versions' . self::seg(is_array($version) ? $version['id'] : $version), []];
-        $resp = $this->send('GET', $this->at($path, $query), null, $headers, true);
+            : [self::seg($this->xidAt($file, $actingAs)) . '/versions' . self::seg(is_array($version) ? $version['id'] : $version), []];
+        $resp = $this->send('GET', $this->at($path, $query), null, $headers, true, $actingAs);
         return $resp->status === 304 ? null : $resp->body;
     }
 
@@ -233,11 +236,11 @@ final class Files
      * @param list<string|array{xid?: string, path?: string}> $files
      * @param list<string|array{xid?: string, path?: string}> $folders
      */
-    public function zip(array $files = [], array $folders = []): string
+    public function zip(array $files = [], array $folders = [], ?string $actingAs = null): string
     {
         $fileRef = static fn (string|array $f): string => is_array($f) ? (string)($f['xid'] ?? $f['path'] ?? '') : $f;
         $body = json_encode(['files' => array_map($fileRef, $files), 'folders' => array_map(self::folderRef(...), $folders)], JSON_THROW_ON_ERROR);
-        return $this->send('POST', $this->at('/zip'), $body, ['Content-Type' => 'application/json'], true)->body;
+        return $this->send('POST', $this->at('/zip'), $body, ['Content-Type' => 'application/json'], true, $actingAs)->body;
     }
 
     /**
@@ -246,12 +249,12 @@ final class Files
      * @param string|array{xid: string} $file
      * @return FileInfo|null
      */
-    public function info(string|array $file): ?array
+    public function info(string|array $file, ?string $actingAs = null): ?array
     {
         try {
             [$path, $query] = self::fileAt($file, '/info');
             /** @var FileInfo */
-            return $this->json('GET', $path, null, $query);
+            return $this->json('GET', $path, null, $query, $actingAs);
         } catch (SynthigyError $e) {
             if ($e->code === 'FILE_NOT_FOUND' || $e->code === 'FOLDER_NOT_FOUND') {
                 return null;
@@ -268,19 +271,19 @@ final class Files
      * @param string|array{xid?: string, path?: string}|false|null $folder
      * @return array{files: list<FileInfo>, folders: list<FolderInfo>}
      */
-    public function list(string|array|false|null $folder = false, ?string $q = null, ?int $limit = null, ?int $offset = null): array
+    public function list(string|array|false|null $folder = false, ?string $q = null, ?int $limit = null, ?int $offset = null, ?string $actingAs = null): array
     {
         $page = ['q' => $q, 'limit' => $limit, 'offset' => $offset];
         if ($folder === false || $folder === null) {
             /** @var list<FileInfo> $files */
-            $files = $this->json('GET', '', null, $page + ['folderless' => $folder === null ? 'true' : null])['files'] ?? [];
+            $files = $this->json('GET', '', null, $page + ['folderless' => $folder === null ? 'true' : null], $actingAs)['files'] ?? [];
             return ['files' => $files, 'folders' => []];
         }
         $ref = self::folderRef($folder);
         /** @var list<FileInfo> $files */
-        $files = $this->json('GET', '', null, $page + ['folder' => $ref])['files'] ?? [];
+        $files = $this->json('GET', '', null, $page + ['folder' => $ref], $actingAs)['files'] ?? [];
         /** @var list<FolderInfo> $folders */
-        $folders = $this->json('GET', '/folders', null, ['parent' => $ref])['folders'] ?? [];
+        $folders = $this->json('GET', '/folders', null, ['parent' => $ref], $actingAs)['folders'] ?? [];
         $words = preg_split('/\s+/', trim((string)$q), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         if ($words !== []) {
             $holds = '/' . implode('.*', array_map(static fn ($w) => preg_quote($w, '/'), $words)) . '/iu';
@@ -296,7 +299,7 @@ final class Files
      * @param string|array{xid?: string, path?: string}|null $folder
      * @return array{results: list<array<string,mixed>>, truncated: bool}
      */
-    public function search(string $q, string|array|null $folder = null, ?int $limit = null, ?int $offset = null): array
+    public function search(string $q, string|array|null $folder = null, ?int $limit = null, ?int $offset = null, ?string $actingAs = null): array
     {
         /** @var array{results: list<array<string,mixed>>, truncated: bool} */
         return $this->json('GET', '/search', null, [
@@ -304,7 +307,7 @@ final class Files
             'folder' => $folder === null ? null : self::folderRef($folder),
             'limit' => $limit,
             'offset' => $offset,
-        ]);
+        ], $actingAs);
     }
 
     /**
@@ -313,10 +316,10 @@ final class Files
      *
      * @param string|array{xid?: string, path?: string} $ref
      */
-    public function delete(string|array $ref): void
+    public function delete(string|array $ref, ?string $actingAs = null): void
     {
         [$path, $query] = self::isFolder($ref) ? self::folderAt($ref) : self::fileAt($ref);
-        $this->send('DELETE', $this->at($path, $query));
+        $this->send('DELETE', $this->at($path, $query), null, [], false, $actingAs);
     }
 
     /**
@@ -346,7 +349,7 @@ final class Files
      * @param string|array{xid?: string, path?: string} $from
      * @return FileInfo|FolderInfo
      */
-    public function move(string|array $from, string $to): array
+    public function move(string|array $from, string $to, ?string $actingAs = null): array
     {
         if (!self::isPath($to)) {
             throw new SynthigyError('move takes the new path, for example /site/brand/logo.png', 'INVALID_PATH');
@@ -359,13 +362,13 @@ final class Files
             }
             [$path, $query] = self::folderAt($from);
             /** @var FolderInfo */
-            return $this->json('PATCH', $path, ['name' => $name, 'parent' => $parts === [] ? '/' : '/' . implode('/', $parts) . '/'], $query);
+            return $this->json('PATCH', $path, ['name' => $name, 'parent' => $parts === [] ? '/' : '/' . implode('/', $parts) . '/'], $query, $actingAs);
         }
         $cut = strrpos($to, '/');
         [$path, $query] = self::fileAt($from);
         $payload = str_ends_with($to, '/') ? ['folder' => $to] : ['folder' => substr($to, 0, $cut + 1), 'name' => substr($to, $cut + 1)];
         /** @var FileInfo */
-        return $this->json('PATCH', $path, $payload, $query);
+        return $this->json('PATCH', $path, $payload, $query, $actingAs);
     }
 
     /**
@@ -375,10 +378,10 @@ final class Files
      * @param array{public?: ?bool, cache?: ?int, can_link?: ?bool} $settings
      * @return FolderInfo
      */
-    public function folder(string $path, array $settings = []): array
+    public function folder(string $path, array $settings = [], ?string $actingAs = null): array
     {
         /** @var FolderInfo */
-        return $this->json('PUT', '/folders', array_intersect_key($settings, ['public' => 1, 'cache' => 1, 'can_link' => 1]), ['path' => $path]);
+        return $this->json('PUT', '/folders', array_intersect_key($settings, ['public' => 1, 'cache' => 1, 'can_link' => 1]), ['path' => $path], $actingAs);
     }
 
     /**
@@ -389,10 +392,10 @@ final class Files
      * @param list<string|array{xid: string}> $users
      * @param list<string|array{xid: string}> $groups
      */
-    public function share(string|array $folder, string $access, array $users = [], array $groups = []): void
+    public function share(string|array $folder, string $access, array $users = [], array $groups = [], ?string $actingAs = null): void
     {
         [$path, $query] = self::folderAt($folder, '/share');
-        $this->json('POST', $path, self::grantees($access, $users, $groups), $query);
+        $this->json('POST', $path, self::grantees($access, $users, $groups), $query, $actingAs);
     }
 
     /**
@@ -402,10 +405,10 @@ final class Files
      * @param list<string|array{xid: string}> $users
      * @param list<string|array{xid: string}> $groups
      */
-    public function unshare(string|array $folder, string $access, array $users = [], array $groups = []): void
+    public function unshare(string|array $folder, string $access, array $users = [], array $groups = [], ?string $actingAs = null): void
     {
         [$path, $query] = self::folderAt($folder, '/unshare');
-        $this->json('POST', $path, self::grantees($access, $users, $groups), $query);
+        $this->json('POST', $path, self::grantees($access, $users, $groups), $query, $actingAs);
     }
 
     /**
@@ -428,11 +431,11 @@ final class Files
      * @param string|array{xid?: string, path?: string} $folder
      * @return array<string, array{users: list<array{xid: string, name: ?string}>, groups: list<array{xid: string, name: ?string}>}>
      */
-    public function access(string|array $folder): array
+    public function access(string|array $folder, ?string $actingAs = null): array
     {
         [$path, $query] = self::folderAt($folder, '/access');
         /** @var array<string, array{users: list<array{xid: string, name: ?string}>, groups: list<array{xid: string, name: ?string}>}> */
-        return $this->json('GET', $path, null, $query);
+        return $this->json('GET', $path, null, $query, $actingAs);
     }
 
     /**
@@ -441,10 +444,10 @@ final class Files
      * @param string|array{xid: string} $file
      * @return list<array{id: int, at: string, by: ?string, hash: ?string, size: ?int, content_type: ?string, current: bool}>
      */
-    public function versions(string|array $file): array
+    public function versions(string|array $file, ?string $actingAs = null): array
     {
         /** @var list<array{id: int, at: string, by: ?string, hash: ?string, size: ?int, content_type: ?string, current: bool}> */
-        return $this->json('GET', self::seg($this->xidAt($file)) . '/versions')['versions'] ?? [];
+        return $this->json('GET', self::seg($this->xidAt($file, $actingAs)) . '/versions', null, [], $actingAs)['versions'] ?? [];
     }
 
     /**
@@ -454,10 +457,10 @@ final class Files
      * @param int|array{id: int} $version
      * @return FileInfo
      */
-    public function restore(string|array $file, int|array $version): array
+    public function restore(string|array $file, int|array $version, ?string $actingAs = null): array
     {
         /** @var FileInfo */
-        return $this->json('POST', self::seg($this->xidAt($file)) . '/versions' . self::seg(is_array($version) ? $version['id'] : $version) . '/restore');
+        return $this->json('POST', self::seg($this->xidAt($file, $actingAs)) . '/versions' . self::seg(is_array($version) ? $version['id'] : $version) . '/restore', null, [], $actingAs);
     }
 
     /**
@@ -468,11 +471,11 @@ final class Files
      * @param string|array{xid: string} $file
      * @return FileLink
      */
-    public function link(string|array $file, ?int $expires = null, ?int $maxDownloads = null, ?bool $inline = null): array
+    public function link(string|array $file, ?int $expires = null, ?int $maxDownloads = null, ?bool $inline = null, ?string $actingAs = null): array
     {
         $opts = array_filter(['expires' => $expires, 'max_downloads' => $maxDownloads, 'inline' => $inline], static fn ($v) => $v !== null);
         /** @var FileLink */
-        return $this->json('POST', self::seg($this->xidAt($file)) . '/links', $opts);
+        return $this->json('POST', self::seg($this->xidAt($file, $actingAs)) . '/links', $opts, [], $actingAs);
     }
 
     /**
@@ -481,10 +484,10 @@ final class Files
      * @param string|array{xid: string} $file
      * @return list<FileLink>
      */
-    public function links(string|array $file): array
+    public function links(string|array $file, ?string $actingAs = null): array
     {
         /** @var list<FileLink> */
-        return $this->json('GET', self::seg($this->xidAt($file)) . '/links')['links'] ?? [];
+        return $this->json('GET', self::seg($this->xidAt($file, $actingAs)) . '/links', null, [], $actingAs)['links'] ?? [];
     }
 
     /**
@@ -492,9 +495,9 @@ final class Files
      *
      * @param string|array{xid: string} $link
      */
-    public function unlink(string|array $link): void
+    public function unlink(string|array $link, ?string $actingAs = null): void
     {
-        $this->send('DELETE', $this->at('/links' . self::seg(self::xid($link))));
+        $this->send('DELETE', $this->at('/links' . self::seg(self::xid($link))), null, [], false, $actingAs);
     }
 
     /**
@@ -506,7 +509,7 @@ final class Files
      * @param string|array{xid: string} $file
      * @param array<string,string> $headers the browser's request headers
      */
-    public function serve(string|array $file, array $headers = [], string $method = 'GET', bool $inline = false): HttpResponse
+    public function serve(string|array $file, array $headers = [], string $method = 'GET', bool $inline = false, ?string $actingAs = null): HttpResponse
     {
         $incoming = array_change_key_case($headers, CASE_LOWER);
         $pass = [];
@@ -514,6 +517,9 @@ final class Files
             if (($incoming[strtolower($k)] ?? '') !== '') {
                 $pass[$k] = $incoming[strtolower($k)];
             }
+        }
+        if ($actingAs !== null && $actingAs !== '') {
+            $pass['X-Acting-As'] = $actingAs;
         }
         [$path, $query] = self::fileAt($file);
         if ($inline) {

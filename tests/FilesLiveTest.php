@@ -12,7 +12,7 @@ use Synthigy\SynthigyError;
 /**
  * Live files suite: three clients (File Admin, File User, File Reader) against a real server.
  *
- * Env: SYNTHIGY_FILES_TEST_ENDPOINT and SYNTHIGY_FILES_TEST_{ADMIN,USER,READER}_{ID,SECRET}.
+ * Env: SYNTHIGY_FILES_TEST_ENDPOINT and SYNTHIGY_FILES_TEST_{ADMIN,USER,READER,BFF}_{ID,SECRET} (BFF: trusted, File Admin).
  *
  * @phpstan-import-type FileInfo from \Synthigy\Files
  */
@@ -22,6 +22,7 @@ final class FilesLiveTest extends TestCase
     private Client $admin;
     private Client $user;
     private Client $reader;
+    private Client $bff;
     private string $run;
     private string $top;
 
@@ -35,11 +36,12 @@ final class FilesLiveTest extends TestCase
     {
         $endpoint = getenv('SYNTHIGY_FILES_TEST_ENDPOINT') ?: null;
         if ($endpoint === null) {
-            self::markTestSkipped('live files suite needs SYNTHIGY_FILES_TEST_ENDPOINT and SYNTHIGY_FILES_TEST_{ADMIN,USER,READER}_{ID,SECRET}');
+            self::markTestSkipped('live files suite needs SYNTHIGY_FILES_TEST_ENDPOINT and SYNTHIGY_FILES_TEST_{ADMIN,USER,READER,BFF}_{ID,SECRET}');
         }
         $this->admin = self::client($endpoint, 'ADMIN');
         $this->user = self::client($endpoint, 'USER');
         $this->reader = self::client($endpoint, 'READER');
+        $this->bff = self::client($endpoint, 'BFF');
         $this->run = 'php-' . bin2hex(random_bytes(4));
         $this->top = "/F-{$this->run}/";
     }
@@ -233,6 +235,18 @@ final class FilesLiveTest extends TestCase
         self::expectErr('FORBIDDEN', 'iam', fn () => $reader->put("{$top}r-{$run}.bin", $bin));
         self::expectErr('FORBIDDEN', 'iam', fn () => $reader->put($f, $next));
         self::expectErr('FORBIDDEN', 'iam', fn () => $reader->folder("{$top}r-{$run}/"));
+
+        // 4b. a trusted client acting as the user and the reader
+        $bff = $this->bff->files();
+        self::assertSame($loose['xid'], $bff->info($loose)['xid'] ?? null);
+        self::assertNull($bff->info($loose, actingAs: $readerXid));
+        self::assertSame($bin, $bff->download($f['xid'], actingAs: $readerXid));
+        self::expectErr('FORBIDDEN', 'iam', fn () => $bff->put("{$top}bff-r-{$run}.bin", $bin, actingAs: $readerXid));
+        $own = $bff->put("{$top}bff-u-{$run}.bin", $bin, actingAs: $userXid);
+        self::assertSame($userXid, $own['uploaded_by']['xid'] ?? null);
+        $bff->delete($own, actingAs: $userXid);
+        self::assertNull($bff->info($own));
+        self::assertSame('NOT_TRUSTED', self::err(fn () => $admin->info($f, actingAs: $readerXid))->code);
 
         // 5. links for browsers
         $notePath = "{$top}note-{$run}.txt";

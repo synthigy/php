@@ -50,7 +50,6 @@ final class Client
     private readonly HttpTransport $transport;
     private readonly ?TokenSource $tokenSource; // null in static-token mode
     private readonly ?string $staticToken;
-    private readonly ?string $defaultActingAs;
     private readonly ?string $defaultKeyFormat;
     private readonly ?float $defaultTimeoutSeconds;
     private readonly string $defaultAudience;
@@ -65,7 +64,6 @@ final class Client
         ?string $clientId = null,
         ?string $clientSecret = null,
         ?string $scope = null,
-        ?string $actingAs = null,
         ?string $keyFormat = null,
         ?float $timeoutSeconds = null,
         ?string $audience = null,
@@ -85,7 +83,6 @@ final class Client
         $this->endpoint = rtrim($endpoint, '/');
         $this->dataUrl = $this->endpoint . '/data';
         $this->transport = $transport ?? new CurlTransport();
-        $this->defaultActingAs = $actingAs;
         $this->defaultKeyFormat = $keyFormat;
         $this->defaultTimeoutSeconds = $timeoutSeconds;
         // kept outside the auth chain: a static-token client can still be confidential for login
@@ -257,7 +254,7 @@ final class Client
     public function exec(array $operations, ?string $actingAs = null, ?string $keyFormat = null): array
     {
         $body = ['operations' => $operations];
-        $aa = $actingAs ?? $this->defaultActingAs;
+        $aa = $actingAs;
         if ($aa !== null) {
             $body['acting_as'] = $aa;
         }

@@ -3,6 +3,19 @@
 All notable changes to `synthigy/sdk` (Packagist). Follows
 [semver](https://semver.org). Pre-1.0: breaking changes can land on minor bumps.
 
+## 0.3.0
+
+Needs engine v0.5.0 or later.
+
+### Breaking
+- **No client-wide `$actingAs`.** Removed from `new Client(...)` and
+  `Synthigy::connect(...)`; pass `actingAs:` per call. Parameters after it move
+  up one place: callers passing them by position must use named arguments.
+
+### Added
+- **Acting as a user on files.** `?string $actingAs` (last parameter, use it by name) on every `files()` call;
+  sent as `X-Acting-As`.
+  A trusted BFF works on files as the user, like `/data`.
 ## 0.2.5
 
 Needs an engine with `POST /files/zip` (after v0.4.1).

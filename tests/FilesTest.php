@@ -35,6 +35,56 @@ final class FilesTest extends TestCase
         self::fail('expected a SynthigyError');
     }
 
+    /** @return int how many calls ran */
+    private function everyFilesCall(FakeTransport $t, ?string $as): int
+    {
+        $any = ['xid' => 'f9', 'name' => 'r.txt', 'files' => [], 'folders' => [], 'versions' => [], 'links' => [], 'results' => [], 'truncated' => false];
+        for ($i = 0; $i < 40; $i++) {
+            $t->respondJson(200, $any);
+        }
+        $f = $this->client($t)->files();
+        $calls = [
+            fn () => $f->put('/docs/a.txt', 'x', actingAs: $as),
+            fn () => $f->download('/r.txt', version: 7, actingAs: $as),
+            fn () => $f->zip(['f1'], actingAs: $as),
+            fn () => $f->info('f9', actingAs: $as),
+            fn () => $f->list('/a/', actingAs: $as),
+            fn () => $f->list(actingAs: $as),
+            fn () => $f->search('q', actingAs: $as),
+            fn () => $f->delete('f1', actingAs: $as),
+            fn () => $f->move('f1', '/b/', actingAs: $as),
+            fn () => $f->folder('/a/', actingAs: $as),
+            fn () => $f->share('/a/', 'read', ['u2'], actingAs: $as),
+            fn () => $f->unshare('/a/', 'read', ['u2'], actingAs: $as),
+            fn () => $f->access('/a/', actingAs: $as),
+            fn () => $f->versions('/r.txt', actingAs: $as),
+            fn () => $f->restore('/r.txt', 7, actingAs: $as),
+            fn () => $f->link('/r.txt', actingAs: $as),
+            fn () => $f->links('/r.txt', actingAs: $as),
+            fn () => $f->unlink('l1', actingAs: $as),
+            fn () => $f->serve('f1', [], actingAs: $as),
+        ];
+        foreach ($calls as $call) {
+            $call();
+        }
+        return count($calls);
+    }
+
+    public function testActingAsOnEveryCall(): void
+    {
+        $t = new FakeTransport();
+        $n = $this->everyFilesCall($t, 'u7');
+        self::assertGreaterThanOrEqual($n, count($t->requests));
+        foreach ($t->requests as $r) {
+            self::assertSame('u7', $r['headers']['X-Acting-As'] ?? null, $r['method'] . ' ' . $r['url']);
+        }
+        $t = new FakeTransport();
+        $this->everyFilesCall($t, null);
+        foreach ($t->requests as $r) {
+            self::assertArrayNotHasKey('X-Acting-As', $r['headers'], $r['method'] . ' ' . $r['url']);
+        }
+    }
+
     public function testPut(): void
     {
         $t = new FakeTransport();

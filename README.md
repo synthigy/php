@@ -477,9 +477,10 @@ up in a `finally`).
 
 `tests/FilesLiveTest.php` (same `live` group) exercises `/files` end to end:
 uploads, ranges, versions, folders, sharing and the refusals between a File
-Admin, a File User and a File Reader. It skips unless
+Admin, a File User, a File Reader and a trusted File Admin client that acts as
+the others. It skips unless
 `SYNTHIGY_FILES_TEST_ENDPOINT` is set, plus
-`SYNTHIGY_FILES_TEST_{ADMIN,USER,READER}_{ID,SECRET}` (client-credentials
+`SYNTHIGY_FILES_TEST_{ADMIN,USER,READER,BFF}_{ID,SECRET}` (client-credentials
 clients whose service users hold those roles). Every name carries a run id
 and the test removes what it created.
 
